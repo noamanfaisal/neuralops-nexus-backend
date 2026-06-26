@@ -1,0 +1,131 @@
+Build a Next.js 15 App Router project for NeuralOps — an AI workspace platform.
+
+## PRINCIPLES (non-negotiable, apply everywhere)
+
+1. All API calls go in /src/services/ — one file per domain. Zero fetch() calls inside components.
+2. Use TanStack Query for all server data. Components never call fetch directly.
+3. Auth token lives in Zustand (authStore). The base API client attaches it automatically to every request.
+4. Use shadcn/ui for all UI components. Do not invent custom components when a shadcn one exists.
+5. CSS variables for all colors — never hardcode hex. Theme changes happen in globals.css only.
+6. TypeScript everywhere. No .js files.
+7. Keep components small and single-purpose. If a component grows beyond ~100 lines, split it.
+8. Base API URL always from: process.env.NEXT_PUBLIC_API_URL
+
+## TECH STACK
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 15 (App Router) |
+| Language | TypeScript |
+| Styling | Tailwind CSS + shadcn/ui |
+| Server state | TanStack Query |
+| Client state | Zustand |
+| HTTP client | Native fetch (wrapped in api.client.ts) |
+| Streaming | Native EventSource (SSE) |
+| Icons | Lucide React |
+| Forms | React Hook Form + Zod |
+
+## THEME
+
+Feel: clean, minimal, professional — like ChatGPT or Linear. Generous white space. Nothing feels cramped.
+
+Define all colors in globals.css as CSS variables:
+
+:root {
+  --background: #ffffff;
+  --background-subtle: #f9fafb;
+  --foreground: #111827;
+  --foreground-muted: #6b7280;
+  --primary: #7c3aed;
+  --primary-hover: #6d28d9;
+  --primary-foreground: #ffffff;
+  --primary-tint: #f5f3ff;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --input: #ffffff;
+  --ring: #7c3aed;
+  --card: #ffffff;
+  --sidebar: #f9fafb;
+  --muted: #f3f4f6;
+  --muted-foreground: #9ca3af;
+}
+
+Typography:
+- Font: Inter (Google Fonts)
+- Base size: 14px, headings semibold, line height 1.6
+
+Components:
+- Buttons: rounded-md, violet primary, ghost secondary
+- Inputs: rounded-md, subtle border, violet focus ring
+- Sidebar items: px-3 py-2, rounded-md on hover/active, icon + label
+- Cards: white background, subtle border, rounded-lg, no heavy shadows
+- Modals: centered, rounded-xl, soft backdrop
+
+RULE: Components always use var(--variable-name). Never raw hex, never hardcoded Tailwind colors.
+
+## PROJECT STRUCTURE
+
+src/
+├── app/                    # pages and layouts
+├── components/
+│   ├── ui/                 # shadcn components only
+│   ├── layout/             # AppShell, Sidebar, TopBar
+│   ├── auth/               # login/signup/invite forms
+│   ├── chat/               # chat area (leave renderers as placeholders)
+│   └── shared/             # reusable pieces used across pages
+├── services/               # ALL API calls
+│   ├── api.client.ts
+│   ├── auth.service.ts
+│   ├── companies.service.ts
+│   ├── users.service.ts
+│   ├── projects.service.ts
+│   ├── channels.service.ts
+│   ├── topics.service.ts
+│   ├── messages.service.ts
+│   ├── agents.service.ts
+│   ├── personas.service.ts
+│   ├── ai-models.service.ts
+│   ├── mcp-servers.service.ts
+│   ├── knowledge-base.service.ts
+│   └── notifications.service.ts
+├── store/
+│   ├── auth.store.ts       # token, user, currentCompany
+│   └── ui.store.ts         # activeTopicId, sidebar state
+├── hooks/                  # TanStack Query hooks
+└── types/                  # shared TypeScript interfaces
+
+## SERVICE FILES
+
+Generate each service file as an empty shell with typed function signatures only — no implementation. I will implement the actual API calls separately.
+
+## APP SHELL
+
+Generate auth pages (login, signup) and the main app shell only:
+
+- /login and /signup — clean centered forms
+- /app — left sidebar (260px) + main content area
+  - Sidebar: company name + switcher at top, project → channel → topic tree (expandable, + buttons to add each level), notification bell + settings + user avatar at bottom
+  - Top bar: breadcrumb, search icon
+  - Content area: empty placeholder — pages will be added one by one
+
+## PLACEHOLDER COMPONENTS
+
+Leave these as empty divs with a data-component attribute. Do not implement them:
+
+- ChatMessageList
+- ChatMessageItem
+- StreamingIndicator
+- TextRenderer
+- CodeRenderer
+- GraphRenderer
+- TerminalRenderer
+- FormRenderer
+- WebRenderer
+
+## EXPANDABILITY RULE
+
+Any new page, modal, or feature added in future automatically follows the same patterns. New pages import from /services. New components use shadcn. New colors use CSS variables. Nothing special needed to stay consistent.
+
+Generate .env.local.example with NEXT_PUBLIC_API_URL=http://localhost:8000
+
+Push to GitHub when done.

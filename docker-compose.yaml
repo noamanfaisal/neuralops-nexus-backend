@@ -1,11 +1,11 @@
 services:
   # NUCLEUS: The Orchestrator
   nucleus:
-    image: neuralops-backend:3.0
+    image: nexus-backend:1.0
     container_name: nexus-nucleus
-    build:
-      context: ./modules/nexus-nucleus
-      dockerfile: ./docker/dev/Dockerfile.nexus-nucleus
+    # build:
+    #   context: ./modules/nexus-nucleus
+    #   dockerfile: ./docker/dev/Dockerfile.nexus-nucleus
     ports:
       - "8003:8000"
     volumes:
@@ -21,6 +21,13 @@ services:
       - CENTRIFUGO_API_KEY=${CENTRIFUGO_API_KEY}
       - CENTRIFUGO_HMAC_SECRET=${CENTRIFUGO_HMAC_SECRET}
       - PYTHONPATH=/nexus-nucleus
+      - AI_PROVIDER=${AI_PROVIDER}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE}
+      - AIDER_MODEL=${AIDER_MODEL}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+      - AIDER_MAP_TOKENS=${AIDER_MAP_TOKENS}
     networks:
       - nexus-network
     depends_on:
@@ -89,7 +96,7 @@ services:
     networks:
       - nexus-network
   postgres:
-    image: postgres:16
+    image: postgres:17-alpine
     container_name: nexus-postgres
     restart: always
     environment:
