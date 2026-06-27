@@ -71,3 +71,9 @@ Database Volumes: Data is persisted locally in ./data/postgres_data and ./data/c
 > 
 > * **`dev` (Default):** This is the active, stable development branch. **Clients and users should clone from this branch.**
 > * **`master`:** This branch is currently legacy/outdated and is pending deprecation. Do not deploy from `master`.
+
+
+
+git subtree pull --prefix=modules/neuralops-frontend \
+  git@personal_github:mapax-io/neuralops-workspace.git main --squash
+git push origin main

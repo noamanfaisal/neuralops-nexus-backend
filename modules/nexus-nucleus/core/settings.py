@@ -37,10 +37,15 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'ninja', 
+    'ninja',
     'nucleus',
     'authn',
     'guardian',
+]
+
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'guardian.backends.ObjectPermissionBackend',
 ]
 
 MIDDLEWARE = [
@@ -51,7 +56,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    "guardian.backends.ObjectPermissionBackend",
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -139,7 +143,10 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = "nucleus.User"
-# settings for Supabase JWT verification
+
+# =========================================================
+# Supabase JWT verification
+# =========================================================
 
 SUPABASE_URL = "https://srkhiminurogqlwdjkjx.supabase.co"
 
@@ -152,3 +159,43 @@ SUPABASE_JWT_ISSUER = (
 )
 
 SUPABASE_JWT_AUDIENCE = "authenticated"
+
+# Supabase anon key — required as Bearer token when calling edge functions
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+
+# =========================================================
+# NeuralOps Device Auth
+# =========================================================
+
+NEURALOPS_INSTALL_TOKEN = os.getenv("NEURALOPS_INSTALL_TOKEN", "")
+SUPABASE_DEVICE_POLL_URL = os.getenv(
+    "SUPABASE_DEVICE_POLL_URL",
+    "https://srkhiminurogqlwdjkjx.supabase.co/functions/v1/device-poll",
+)
+SUPABASE_DEVICE_REQUEST_URL = os.getenv(
+    "SUPABASE_DEVICE_REQUEST_URL",
+    "https://srkhiminurogqlwdjkjx.supabase.co/functions/v1/device-request",
+)
+NEURALOPS_PORTAL_URL = os.getenv(
+    "NEURALOPS_PORTAL_URL",
+    "https://neuralops-nexus-auth.mapax.io",
+)
+
+# =========================================================
+# Celery — Async Task Queue
+# =========================================================
+
+_REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+CELERY_BROKER_URL = _REDIS_URL
+CELERY_RESULT_BACKEND = _REDIS_URL
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = "UTC"
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 60 * 35
+CELERY_TASK_SOFT_TIME_LIMIT = 60 * 31
+
+# Default queue for all NeuralOps tasks
+CELERY_TASK_DEFAULT_QUEUE = "neuralops"

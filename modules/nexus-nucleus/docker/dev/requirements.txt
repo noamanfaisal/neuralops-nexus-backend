@@ -15,12 +15,17 @@ dj-database-url
 PyJWT
 cryptography
 passlib[bcrypt]
+django-guardian
 
 # HTTP Communication
 httpx
 
 # Realtime Transport
 centrifuge-python
+
+# Async Task Queue
+celery[redis]
+redis
 
 # File Handling
 pillow
