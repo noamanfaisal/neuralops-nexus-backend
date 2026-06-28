@@ -35,5 +35,13 @@ export function useServers() {
     saveServers(next);
   }
 
-  return { servers, add, remove };
+  function touch(id: string) {
+    const next = servers.map((s) =>
+      s.id === id ? { ...s, lastConnected: Date.now() } : s,
+    );
+    setServers(next);
+    saveServers(next);
+  }
+
+  return { servers, add, remove, touch };
 }

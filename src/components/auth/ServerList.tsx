@@ -8,10 +8,10 @@ import { useServers } from "./use-servers";
 import { useAuthStore } from "@/store/auth.store";
 import { verifyServerAccess } from "@/services/auth.service";
 import type { ServerEntry } from "@/types";
-import { Plus } from "lucide-react";
+import { Plus, Server } from "lucide-react";
 
 export function ServerList() {
-  const { servers, add, remove } = useServers();
+  const { servers, add, remove, touch } = useServers();
   const supabaseToken = useAuthStore((s) => s.supabaseToken);
   const setServerUrl = useAuthStore((s) => s.setServerUrl);
   const navigate = useNavigate();
@@ -20,28 +20,33 @@ export function ServerList() {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [connectingId, setConnectingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [connectedId, setConnectedId] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   async function handleConnect(server: ServerEntry) {
     if (!supabaseToken) {
-      setError("You are not signed in.");
+      setErrors({ [server.id]: "You are not signed in." });
       return;
     }
-    setError(null);
+    setErrors((e) => ({ ...e, [server.id]: "" }));
     setConnectingId(server.id);
     const cleanUrl = server.url.replace(/\/$/, "");
     const result = await verifyServerAccess(cleanUrl, supabaseToken);
     setConnectingId(null);
 
     if (result.ok) {
+      touch(server.id);
+      setConnectedId(server.id);
       setServerUrl(cleanUrl);
-      navigate({ to: "/app" });
-    } else if (result.status === 403) {
-      setError("You don't have access to this server.");
-    } else if (result.status === 0) {
-      setError("Could not connect to server.");
+      setTimeout(() => navigate({ to: "/app" }), 500);
     } else {
-      setError(`Server returned ${result.status}.`);
+      const msg =
+        result.status === 403
+          ? "You don't have access to this server."
+          : result.status === 0
+            ? "Could not connect to server."
+            : `Server returned ${result.status}.`;
+      setErrors((e) => ({ ...e, [server.id]: msg }));
     }
   }
 
@@ -56,15 +61,18 @@ export function ServerList() {
 
   return (
     <div className="flex flex-col gap-4">
-      {error && (
-        <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          {error}
-        </p>
-      )}
-
       {servers.length === 0 && !adding && (
-        <div className="rounded-lg border border-dashed border-border-strong p-8 text-center text-sm text-foreground-muted">
-          No servers yet. Add your first NeuralOps server to get started.
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-card p-10 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Server className="h-6 w-6" />
+          </div>
+          <div className="text-sm font-medium text-foreground">
+            No servers connected yet
+          </div>
+          <p className="max-w-sm text-xs text-foreground-muted">
+            Add your NeuralOps backend URL to get started. This is usually your
+            local IP or Tailscale address.
+          </p>
         </div>
       )}
 
@@ -74,8 +82,17 @@ export function ServerList() {
             key={s.id}
             server={s}
             onConnect={handleConnect}
-            onRemove={remove}
+            onRemove={(id) => {
+              remove(id);
+              setErrors((e) => {
+                const next = { ...e };
+                delete next[id];
+                return next;
+              });
+            }}
             connecting={connectingId === s.id}
+            connected={connectedId === s.id}
+            error={errors[s.id] || null}
           />
         ))}
       </div>
@@ -89,7 +106,7 @@ export function ServerList() {
             <Label htmlFor="server-name">Name</Label>
             <Input
               id="server-name"
-              placeholder="Production"
+              placeholder="e.g. My Mac, Home Server, Office"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -98,10 +115,13 @@ export function ServerList() {
             <Label htmlFor="server-url">URL</Label>
             <Input
               id="server-url"
-              placeholder="http://100.x.x.x:8000"
+              placeholder="e.g. http://192.168.1.90:8003 or http://100.x.x.x:8003"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
+            <p className="text-xs text-foreground-muted">
+              This is the address of your NeuralOps Django backend
+            </p>
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setAdding(false)}>
