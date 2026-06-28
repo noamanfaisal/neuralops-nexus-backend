@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  resetPassword,
   signInWithEmail,
   signInWithGitHub,
   signUpWithEmail,
@@ -27,6 +28,12 @@ export function LoginForm() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const [showReset, setShowReset] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+  const [resetErr, setResetErr] = useState<string | null>(null);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const {
     register,
@@ -67,6 +74,24 @@ export function LoginForm() {
     }
   }
 
+  async function onSendReset() {
+    setResetErr(null);
+    setResetMsg(null);
+    if (!resetEmail.trim()) {
+      setResetErr("Enter your email.");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      await resetPassword(resetEmail.trim());
+      setResetMsg("Check your email for a reset link.");
+    } catch (e) {
+      setResetErr(e instanceof Error ? e.message : "Could not send reset link.");
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
   return (
     <form
       onSubmit={handleSubmit(onSubmit)}
@@ -91,6 +116,61 @@ export function LoginForm() {
           <p className="text-xs text-destructive">{errors.password.message}</p>
         )}
       </div>
+
+      {mode === "signin" && (
+        <div className="flex flex-col gap-2">
+          {!showReset ? (
+            <button
+              type="button"
+              onClick={() => setShowReset(true)}
+              className="self-start text-xs text-primary hover:underline"
+            >
+              Forgot password?
+            </button>
+          ) : (
+            <div className="flex flex-col gap-2 rounded-md border border-border bg-background-subtle p-3">
+              <Label htmlFor="reset-email" className="text-xs">
+                Reset password email
+              </Label>
+              <Input
+                id="reset-email"
+                type="email"
+                placeholder="you@example.com"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onSendReset}
+                  disabled={resetLoading}
+                >
+                  {resetLoading ? "Sending…" : "Send reset link"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setShowReset(false);
+                    setResetErr(null);
+                    setResetMsg(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+              {resetMsg && (
+                <p className="text-xs text-foreground-muted">{resetMsg}</p>
+              )}
+              {resetErr && (
+                <p className="text-xs text-destructive">{resetErr}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">

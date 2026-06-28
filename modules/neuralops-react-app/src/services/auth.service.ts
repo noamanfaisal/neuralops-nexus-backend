@@ -33,6 +33,18 @@ export async function signOut() {
   if (error) throw error;
 }
 
+export async function resetPassword(email: string): Promise<void> {
+  const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/reset-password`,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function updatePassword(newPassword: string): Promise<void> {
+  const { error } = await getSupabase().auth.updateUser({ password: newPassword });
+  if (error) throw new Error(error.message);
+}
+
 export async function getCurrentSession() {
   const { data } = await getSupabase().auth.getSession();
   return data.session;
