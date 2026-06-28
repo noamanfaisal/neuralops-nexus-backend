@@ -23,8 +23,6 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - NEURALOPS_INSTALL_TOKEN=${NEURALOPS_INSTALL_TOKEN}
-      - SUPABASE_DEVICE_POLL_URL=${SUPABASE_DEVICE_POLL_URL}
-      - SUPABASE_DEVICE_REQUEST_URL=${SUPABASE_DEVICE_REQUEST_URL}
       - NEURALOPS_PORTAL_URL=${NEURALOPS_PORTAL_URL:-https://neuralops-nexus-auth.mapax.io}
       - PYTHONPATH=/nexus-nucleus
       - AI_PROVIDER=${AI_PROVIDER}
@@ -58,9 +56,6 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - NEURALOPS_INSTALL_TOKEN=${NEURALOPS_INSTALL_TOKEN}
-      - SUPABASE_DEVICE_POLL_URL=${SUPABASE_DEVICE_POLL_URL}
-      - SUPABASE_DEVICE_REQUEST_URL=${SUPABASE_DEVICE_REQUEST_URL}
-      - NEURALOPS_PORTAL_URL=${NEURALOPS_PORTAL_URL:-https://neuralops-nexus-auth.mapax.io}
       - PYTHONPATH=/nexus-nucleus
     networks:
       - nexus-network
@@ -126,7 +121,7 @@ services:
     networks:
       - nexus-network
 
-  # CHROMADB & POSTGRES remain the same...
+  # CHROMADB & POSTGRES
   chromadb:
     image: chromadb/chroma:latest
     container_name: nexus-chroma
@@ -152,18 +147,16 @@ services:
     networks:
       - nexus-network
 
-  # NEURALOPS FRONTEND: The UI
-  neuralops-frontend:
+  # NEURALOPS REACT APP: The UI
+  neuralops-react-app:
     build:
-      context: ./modules/neuralops-frontend
+      context: ./modules/neuralops-react-app
       dockerfile: Dockerfile
-    container_name: neuralops-frontend
+    container_name: neuralops-react-app
     ports:
-      - "5173:5173"
+      - "3000:3000"
     volumes:
-      - ./modules/neuralops-frontend:/app
-    environment:
-      - VITE_API_URL=${NEURALOPS_API_URL:-http://localhost:8003}
+      - ./modules/neuralops-react-app:/app
     networks:
       - nexus-network
     depends_on:
