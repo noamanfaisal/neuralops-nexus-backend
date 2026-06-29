@@ -2,9 +2,8 @@
 
 | Method | Endpoint |
 | --- | --- |
-| POST | /api/v1/auth/signin |
-| GET | /api/v1/auth/me |
-| POST | /api/v1/auth/logout |
+| GET | /api/v1/auth/callback |
+| GET | /api/v1/auth/logout |
 | POST | /api/v1/auth/refresh |
 | GET | /api/v1/auth/session |
 

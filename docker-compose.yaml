@@ -1,11 +1,11 @@
 services:
   # NUCLEUS: The Orchestrator
   nucleus:
-    image: neuralops-backend:3.0
+    image: nexus-backend:3.0
     container_name: nexus-nucleus
-    build:
-      context: ./modules/nexus-nucleus
-      dockerfile: ./docker/dev/Dockerfile.nexus-nucleus
+    # build:
+    #   context: ./modules/nexus-nucleus
+    #   dockerfile: ./docker/dev/Dockerfile.nexus-nucleus
     ports:
       - "8003:8000"
     volumes:
@@ -20,16 +20,64 @@ services:
       - CENTRIFUGO_API_URL=${CENTRIFUGO_API_URL}
       - CENTRIFUGO_API_KEY=${CENTRIFUGO_API_KEY}
       - CENTRIFUGO_HMAC_SECRET=${CENTRIFUGO_HMAC_SECRET}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - NEURALOPS_INSTALL_TOKEN=${NEURALOPS_INSTALL_TOKEN}
+      - NEURALOPS_PORTAL_URL=${NEURALOPS_PORTAL_URL:-https://neuralops-nexus-auth.mapax.io}
+      - PYTHONPATH=/nexus-nucleus
+      - AI_PROVIDER=${AI_PROVIDER}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE}
+      - AIDER_MODEL=${AIDER_MODEL}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+      - AIDER_MAP_TOKENS=${AIDER_MAP_TOKENS}
+    networks:
+      - nexus-network
+    depends_on:
+      - postgres
+      - redis
+      - realtime
+    working_dir: /nexus-nucleus
+    command: tail -f /dev/null
+
+  # CELERY WORKER: Background Tasks
+  nucleus-celery:
+    image: nexus-backend:3.0
+    container_name: nexus-celery
+    volumes:
+      - ./modules/nexus-nucleus:/nexus-nucleus
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - NEURALOPS_INSTALL_TOKEN=${NEURALOPS_INSTALL_TOKEN}
       - PYTHONPATH=/nexus-nucleus
     networks:
       - nexus-network
     depends_on:
       - postgres
-      - realtime
+      - redis
     working_dir: /nexus-nucleus
-    # command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--proxy-headers"]
-    # command: python -m uvicorn apps.main:app --host 0.0.0.0 --port 8000 --reload
     command: tail -f /dev/null
+    restart: unless-stopped
+
+  # REDIS: Celery Broker & Result Backend
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis_data:/data
+    networks:
+      - nexus-network
+    restart: unless-stopped
+
   # NEXUS-AI: The Worker
   nexus-ai:
     image: nexus-ai:2.0
@@ -53,19 +101,14 @@ services:
     depends_on:
       - chromadb
     working_dir: /nexus-ai
-    # command: ["python", "-m", "uvicorn","-m","app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-    # command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     command: >
       sh -c "export PYTHONPATH=$PYTHONPATH:/nexus-ai && 
              python3 -m uvicorn apps.main:app --host 0.0.0.0 --port 8000 --reload"
+
   # REALTIME: Transport
   realtime:
     image: noamanfaisal/nexus-transport:6.0
     container_name: nexus-transport
-    # build:
-    #   context: ./modules/nexus-transport
-    #   dockerfile: Dockerfile.arm64 for arm64
-    #   dockerfile: Dockerfile
     ports:
       - "8002:8000"
     environment:
@@ -78,7 +121,7 @@ services:
     networks:
       - nexus-network
 
-  # CHROMADB & POSTGRES remain the same...
+  # CHROMADB & POSTGRES
   chromadb:
     image: chromadb/chroma:latest
     container_name: nexus-chroma
@@ -88,22 +131,37 @@ services:
       - IS_PERSISTENT=TRUE
     networks:
       - nexus-network
+
   postgres:
-    image: postgres:16
+    image: postgres:17-alpine
     container_name: nexus-postgres
     restart: always
     environment:
-      # Using the same variable names as your web service for consistency
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      
     ports:
       - "5433:5432"
     volumes:
       - ./data/postgres_data:/var/lib/postgresql/data
     networks:
       - nexus-network
+
+  # NEURALOPS REACT APP: The UI
+  neuralops-react-app:
+    build:
+      context: ./modules/neuralops-react-app
+      dockerfile: Dockerfile
+    container_name: neuralops-react-app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./modules/neuralops-react-app:/app
+    networks:
+      - nexus-network
+    depends_on:
+      - nucleus
+    restart: unless-stopped
 
 networks:
   nexus-network:

@@ -1,5 +1,9 @@
+from typing import Literal, Optional
+
 from ninja import Schema
 
+
+# ── Existing: Supabase JWT sign-in ─────────────────────────────────────────
 
 class SignInRequest(Schema):
     access_token: str
@@ -22,3 +26,29 @@ class ExternalIdentityOut(Schema):
 class SignInResponse(Schema):
     user: LocalUserOut
     external_identity: ExternalIdentityOut
+
+
+# ── Device activation flow ──────────────────────────────────────────────────
+
+class AuthInitResponse(Schema):
+    status: Literal["authenticated", "unauthenticated"]
+    email: Optional[str] = None
+    user_id: Optional[str] = None
+    session_expires_at: Optional[str] = None
+    login_url: Optional[str] = None
+
+
+class AuthStatusResponse(Schema):
+    status: Literal["pending", "active", "session_expired"]
+    email: Optional[str] = None
+    user_id: Optional[str] = None
+    session_expires_at: Optional[str] = None
+
+
+# ── Server connection verify ─────────────────────────────────────────────────
+
+class AuthVerifyResponse(Schema):
+    ok: bool
+    email: str
+    user_id: str
+    is_new_user: bool
