@@ -25,10 +25,9 @@ import { useAuthStore } from "@/store/auth.store";
 import { useUIStore } from "@/store/ui.store";
 import { signOut } from "@/services/auth.service";
 import { MembersPanel } from "@/components/members/MembersPanel";
-import { useProjects, useTopics } from "@/hooks/useWorkspace";
+import { useProjects } from "@/hooks/useWorkspace";
 import { AddProjectDialog } from "@/components/workspace/AddProjectDialog";
 import { AddChannelDialog } from "@/components/workspace/AddChannelDialog";
-import { AddTopicDialog } from "@/components/workspace/AddTopicDialog";
 import type { Project, Channel } from "@/services/workspace.service";
 
 export function Sidebar() {
@@ -194,6 +193,7 @@ export function Sidebar() {
         </Button>
       </div>
 
+      {/* Sheets & Dialogs */}
       <Sheet open={membersOpen} onOpenChange={setMembersOpen}>
         <SheetContent side="right" className="w-[420px] p-0">
           <SheetHeader className="px-4 py-3 border-b">
@@ -209,6 +209,7 @@ export function Sidebar() {
         open={addProjectOpen}
         onOpenChange={setAddProjectOpen}
       />
+
       {addChannelFor && (
         <AddChannelDialog
           open={!!addChannelFor}
@@ -233,8 +234,6 @@ function ProjectNode({
   canManage: boolean;
   onAddChannel: () => void;
 }) {
-  const [openChannels, setOpenChannels] = useState<Record<string, boolean>>({});
-
   return (
     <div className="mb-2">
       <div className="group flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-accent">
@@ -268,20 +267,13 @@ function ProjectNode({
               No channels yet
             </div>
           )}
-          {project.channels.map((channel) => {
-            const copen = openChannels[channel.id] ?? false;
-            return (
-              <ChannelNode
-                key={channel.id}
-                projectId={project.id}
-                channel={channel}
-                open={copen}
-                onToggle={() =>
-                  setOpenChannels((o) => ({ ...o, [channel.id]: !copen }))
-                }
-              />
-            );
-          })}
+          {project.channels.map((channel) => (
+            <ChannelNode
+              key={channel.id}
+              projectId={project.id}
+              channel={channel}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -291,84 +283,26 @@ function ProjectNode({
 function ChannelNode({
   projectId,
   channel,
-  open,
-  onToggle,
 }: {
   projectId: string;
   channel: Channel;
-  open: boolean;
-  onToggle: () => void;
 }) {
-  const [addTopicOpen, setAddTopicOpen] = useState(false);
-  const { data: topics, isLoading } = useTopics(
-    open ? projectId : "",
-    open ? channel.id : "",
-  );
-  const activeTopicId = useUIStore((s) => s.activeTopicId);
+  const activeChannelId = useUIStore((s) => s.activeChannelId);
   const setActiveTopic = useUIStore((s) => s.setActiveTopic);
+  const active = activeChannelId === channel.id;
 
   return (
-    <div className="mb-1">
-      <div className="group flex w-full items-center gap-1 rounded-md px-2 py-1 text-sm text-foreground-muted hover:bg-sidebar-accent hover:text-foreground">
-        <button onClick={onToggle} className="flex flex-1 items-center gap-1">
-          {open ? (
-            <ChevronDown className="h-3 w-3" />
-          ) : (
-            <ChevronRight className="h-3 w-3" />
-          )}
-          <Hash className="h-3 w-3" />
-          <span className="truncate">{channel.name}</span>
-        </button>
-        <button
-          aria-label="Add topic"
-          className="ml-auto opacity-0 group-hover:opacity-100"
-          onClick={(e) => {
-            e.stopPropagation();
-            setAddTopicOpen(true);
-          }}
-        >
-          <Plus className="h-3 w-3" />
-        </button>
-      </div>
-
-      {open && (
-        <div className="ml-3 mt-0.5 flex flex-col gap-0.5">
-          {isLoading && (
-            <div className="px-2 py-1">
-              <Skeleton className="h-4 w-3/4" />
-            </div>
-          )}
-          {!isLoading && topics && topics.length === 0 && (
-            <div className="px-2 py-1 text-xs text-foreground-muted">
-              No topics yet
-            </div>
-          )}
-          {topics?.map((t) => {
-            const active = activeTopicId === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setActiveTopic(projectId, channel.id, t.id)}
-                className={`truncate rounded-md px-2 py-1 text-left text-xs ${
-                  active
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                    : "text-foreground-muted hover:bg-sidebar-accent hover:text-foreground"
-                }`}
-              >
-                {t.title}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      <AddTopicDialog
-        open={addTopicOpen}
-        onOpenChange={setAddTopicOpen}
-        projectId={projectId}
-        channelId={channel.id}
-      />
-    </div>
+    <button
+      onClick={() => setActiveTopic(projectId, channel.id, "")}
+      className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-sm ${
+        active
+          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+          : "text-foreground-muted hover:bg-sidebar-accent hover:text-foreground"
+      }`}
+    >
+      <Hash className="h-3 w-3 shrink-0" />
+      <span className="truncate">{channel.name}</span>
+    </button>
   );
 }
 
