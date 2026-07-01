@@ -3,6 +3,7 @@ from ninja import NinjaAPI
 
 from authn.api import router as authn_router
 from authn.members_api import router as members_router
+from authn.workspace_api import router as workspace_router
 
 
 api = NinjaAPI(
@@ -12,6 +13,7 @@ api = NinjaAPI(
 
 api.add_router("/auth/", authn_router)
 api.add_router("/members/", members_router)
+api.add_router("/projects/", workspace_router)
 
 urlpatterns = [
     path("", api.urls),
