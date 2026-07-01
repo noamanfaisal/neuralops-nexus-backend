@@ -10,12 +10,15 @@ import {
   Bell,
   Settings,
   LogOut,
+  Users,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAuthStore } from "@/store/auth.store";
 import { signOut } from "@/services/auth.service";
 import { useNavigate } from "@tanstack/react-router";
+import { MembersPanel } from "@/components/members/MembersPanel";
 
 // Placeholder static tree — wired to real services in a later prompt.
 const MOCK_TREE = [
@@ -48,6 +51,7 @@ export function Sidebar() {
   const [openChannels, setOpenChannels] = useState<Record<string, boolean>>({
     c1: true,
   });
+  const [membersOpen, setMembersOpen] = useState(false);
 
   async function handleSignOut() {
     try {
@@ -173,6 +177,14 @@ export function Sidebar() {
         <Button size="icon" variant="ghost" aria-label="Notifications">
           <Bell className="h-4 w-4" />
         </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label="Members"
+          onClick={() => setMembersOpen(true)}
+        >
+          <Users className="h-4 w-4" />
+        </Button>
         <Link
           to="/app/settings"
           className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-sidebar-accent"
@@ -195,6 +207,16 @@ export function Sidebar() {
           <LogOut className="h-4 w-4" />
         </Button>
       </div>
+      <Sheet open={membersOpen} onOpenChange={setMembersOpen}>
+        <SheetContent side="right" className="w-[420px] p-0">
+          <SheetHeader className="px-4 py-3 border-b">
+            <SheetTitle>Server Members</SheetTitle>
+          </SheetHeader>
+          <div className="p-4">
+            <MembersPanel />
+          </div>
+        </SheetContent>
+      </Sheet>
     </aside>
   );
 }
