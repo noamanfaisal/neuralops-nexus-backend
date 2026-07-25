@@ -264,6 +264,13 @@ class AIAgent(TenantBaseModel):
         help_text="Remote/online agent endpoint.",
     )
 
+    # -- API Key (encrypted at rest, for external agents) ---------------------
+    api_key_encrypted = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Fernet-encrypted API key. Do not set directly — use set_api_key().",
+    )
+
     secret_ref = models.CharField(
         max_length=255,
         null=True,
@@ -280,6 +287,16 @@ class AIAgent(TenantBaseModel):
     safety_mode = models.BooleanField(default=True)
     max_steps = models.PositiveIntegerField(default=5)
     allow_parallel_tools = models.BooleanField(default=False)
+
+    def set_api_key(self, raw_key: str) -> None:
+        """Encrypt and store an API key for external agents."""
+        self.api_key_encrypted = _fernet().encrypt(raw_key.encode()).decode()
+
+    def get_api_key(self) -> str | None:
+        """Decrypt and return the external agent API key, or None if not set."""
+        if not self.api_key_encrypted:
+            return None
+        return _fernet().decrypt(self.api_key_encrypted.encode()).decode()
 
     class Meta:
         db_table = "intelligence_ai_agent"

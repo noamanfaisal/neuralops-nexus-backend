@@ -8,12 +8,14 @@ from ninja.errors import HttpError
 
 from authn.auth import SupabaseBearer
 from .schema import (
-    AIModelIn, AIModelOut,
+    AIModelIn, AIModelOut, AIModelPatchIn,
     MCPServerIn, MCPServerOut,
     PersonaIn, PersonaPatchIn, PersonaOut,
     PromptTemplateOut,
     CompanyAIConfigIn, CompanyAIConfigOut,
     AIRequestLogOut,
+    AgentIn, AgentOut,
+    TestResultOut,
 )
 from . import services as svc
 
@@ -105,7 +107,22 @@ def create_ai_model(request, payload: AIModelIn):
     if not payload.licence_accepted:
         raise HttpError(400, "You must accept the provider's terms of service.")
     data = payload.dict()
-    model = svc.create_ai_model(company, request.auth, data)
+    try:
+        model = svc.create_ai_model(company, request.auth, data)
+    except Exception as e:
+        msg = str(e)
+        if "unique" in msg.lower() or "duplicate" in msg.lower():
+            raise HttpError(409, f"A model named '{payload.name}' already exists.")
+        raise HttpError(400, msg)
+    return _model_out(model)
+
+
+@router.patch("/ai-models/{model_id}/", response=AIModelOut)
+def patch_ai_model(request, model_id: str, payload: AIModelPatchIn):
+    company = _company(request)
+    model = svc.patch_ai_model(company, model_id, payload.dict(exclude_none=True))
+    if not model:
+        raise HttpError(404, "AI model not found.")
     return _model_out(model)
 
 
@@ -154,7 +171,13 @@ def list_personas(request):
 @router.post("/personas/", response=PersonaOut)
 def create_persona(request, payload: PersonaIn):
     company = _company(request)
-    persona = svc.create_persona(company, request.auth, payload.dict())
+    try:
+        persona = svc.create_persona(company, request.auth, payload.dict())
+    except Exception as e:
+        msg = str(e)
+        if "unique" in msg.lower() or "duplicate" in msg.lower():
+            raise HttpError(409, f"A persona named '{payload.name}' already exists.")
+        raise HttpError(400, msg)
     return _persona_out(persona)
 
 
@@ -248,6 +271,221 @@ def update_ai_config(request, payload: CompanyAIConfigIn):
         embedding_base_url=config.embedding_base_url,
         default_llm_model=config.default_llm_model,
     )
+
+
+# ── AIAgent endpoints (M9) ──────────────────────────────────────────────────
+
+def _agent_out(agent) -> AgentOut:
+    return AgentOut(
+        id=str(agent.id),
+        name=agent.name,
+        description=agent.description,
+        agent_type=agent.agent_type,
+        model_id=str(agent.model_id) if agent.model_id else None,
+        mcp_server_id=str(agent.mcp_server_id) if agent.mcp_server_id else None,
+        external_url=agent.external_url,
+        system_prompt=agent.system_prompt,
+        safety_mode=agent.safety_mode,
+        max_steps=agent.max_steps,
+        allow_parallel_tools=agent.allow_parallel_tools,
+        has_api_key=bool(agent.api_key_encrypted),
+        is_active=agent.is_active,
+    )
+
+
+@router.get("/agents/", response=List[AgentOut])
+def list_agents(request):
+    company = _company(request)
+    return [_agent_out(a) for a in svc.list_agents(company)]
+
+
+@router.post("/agents/", response=AgentOut)
+def create_agent(request, payload: AgentIn):
+    company = _company(request)
+    try:
+        agent = svc.create_agent(company, payload.dict())
+    except Exception as e:
+        raise HttpError(400, str(e))
+    return _agent_out(agent)
+
+
+@router.delete("/agents/{agent_id}/", response={204: None})
+def delete_agent(request, agent_id: str):
+    company = _company(request)
+    if not svc.delete_agent(company, agent_id):
+        raise HttpError(404, "Agent not found.")
+    return 204, None
+
+
+# ── Standalone MCP Server endpoints (M9) ─────────────────────────────────────
+
+@router.get("/mcp-servers/", response=List[MCPServerOut])
+def list_all_mcp_servers(request):
+    company = _company(request)
+    return [_mcp_out(s) for s in svc.list_all_mcp_servers(company)]
+
+
+@router.post("/mcp-servers/", response=MCPServerOut)
+def create_mcp_server_standalone(request, payload: MCPServerIn):
+    company = _company(request)
+    try:
+        server = svc.create_standalone_mcp_server(company, payload.dict())
+    except Exception as e:
+        msg = str(e)
+        if "unique" in msg.lower() or "duplicate" in msg.lower():
+            raise HttpError(409, f"An MCP server named '{payload.name}' already exists.")
+        raise HttpError(400, msg)
+    return _mcp_out(server)
+
+
+@router.delete("/mcp-servers/{server_id}/", response={204: None})
+def delete_mcp_server_standalone(request, server_id: str):
+    company = _company(request)
+    if not svc.delete_standalone_mcp_server(company, server_id):
+        raise HttpError(404, "MCP server not found.")
+    return 204, None
+
+
+# ── Test endpoints (M9) ───────────────────────────────────────────────────────────
+
+def _call_nexus_ai_test(path: str, body: dict) -> TestResultOut:
+    """
+    Proxy a test request to nexus-ai's /api/v1/test/* endpoint.
+    Returns a TestResultOut regardless of success/failure.
+    """
+    import httpx
+    from django.conf import settings
+
+    base_url = getattr(settings, "NEXUS_AI_URL", "").rstrip("/")
+    if not base_url:
+        return TestResultOut(ok=False, error="NEXUS_AI_URL is not configured.")
+
+    try:
+        r = httpx.post(
+            f"{base_url}{path}",
+            json=body,
+            timeout=30,
+        )
+        data = r.json()
+        return TestResultOut(
+            ok=data.get("ok", False),
+            response=data.get("response"),
+            tools=data.get("tools", []),
+            latency_ms=data.get("latency_ms", 0),
+            error=data.get("error"),
+        )
+    except Exception as exc:
+        return TestResultOut(ok=False, error=str(exc))
+
+
+@router.post("/ai-models/{model_id}/test/", response=TestResultOut)
+def test_ai_model(request, model_id: str):
+    """Send a hello message to the model and return the response."""
+    company = _company(request)
+    model = svc.get_ai_model(company, model_id)
+    if not model:
+        raise HttpError(404, "AI model not found.")
+    return _call_nexus_ai_test("/api/v1/test/model/", {
+        "provider": model.provider,
+        "model_id": model.model_id,
+        "api_key": model.get_api_key(),
+        "api_base": model.api_base,
+        "temperature": model.temperature,
+        "max_tokens": 128,
+    })
+
+
+@router.post("/mcp-servers/{server_id}/test/", response=TestResultOut)
+def test_mcp_server(request, server_id: str):
+    """Connect to the MCP server and list its tools."""
+    company = _company(request)
+    server = svc.list_all_mcp_servers(company).filter(id=server_id).first()
+    if not server:
+        raise HttpError(404, "MCP server not found.")
+    return _call_nexus_ai_test("/api/v1/test/mcp/", {
+        "transport": server.transport,
+        "url": server.url,
+        "command": server.command,
+        "timeout_seconds": server.timeout_seconds,
+    })
+
+
+@router.post("/agents/{agent_id}/test/", response=TestResultOut)
+def test_agent(request, agent_id: str):
+    """Test an agent: for internal agents test the model; for external agents ping the URL."""
+    company = _company(request)
+    agent = svc.get_agent(company, agent_id)
+    if not agent:
+        raise HttpError(404, "Agent not found.")
+
+    if agent.agent_type == "internal" and agent.model:
+        m = agent.model
+        return _call_nexus_ai_test("/api/v1/test/model/", {
+            "provider": m.provider,
+            "model_id": m.model_id,
+            "api_key": m.get_api_key(),
+            "api_base": m.api_base,
+            "temperature": m.temperature,
+            "max_tokens": 128,
+        })
+
+    elif agent.agent_type == "external" and agent.external_url:
+        # Ping external agent with a simple health/hello request
+        import httpx, time
+        headers = {}
+        api_key = agent.get_api_key()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        t0 = time.monotonic()
+        try:
+            r = httpx.post(
+                agent.external_url,
+                json={"messages": [{"role": "user", "content": "Hello! Reply in one sentence."}]},
+                headers=headers,
+                timeout=15,
+            )
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            data = r.json()
+            reply = data.get("content") or data.get("response") or str(data)[:200]
+            return TestResultOut(ok=r.is_success, response=reply, latency_ms=latency_ms)
+        except Exception as exc:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            return TestResultOut(ok=False, error=str(exc), latency_ms=latency_ms)
+
+    return TestResultOut(ok=False, error="Agent is not configured (no model or external URL).")
+
+
+@router.post("/personas/{persona_id}/test/", response=TestResultOut)
+def test_persona(request, persona_id: str):
+    """Test a persona by routing to its underlying model or agent."""
+    company = _company(request)
+    persona = svc.get_persona(company, persona_id)
+    if not persona:
+        raise HttpError(404, "Persona not found.")
+
+    if persona.source_type == "model" and persona.model:
+        m = persona.model
+        return _call_nexus_ai_test("/api/v1/test/model/", {
+            "provider": m.provider,
+            "model_id": m.model_id,
+            "api_key": m.get_api_key(),
+            "api_base": m.api_base,
+            "temperature": m.temperature,
+            "max_tokens": 128,
+        })
+
+    elif persona.source_type == "agent" and persona.agent and persona.agent.model:
+        m = persona.agent.model
+        return _call_nexus_ai_test("/api/v1/test/model/", {
+            "provider": m.provider,
+            "model_id": m.model_id,
+            "api_key": m.get_api_key(),
+            "api_base": m.api_base,
+            "temperature": m.temperature,
+            "max_tokens": 128,
+        })
+
+    return TestResultOut(ok=False, error="Persona has no model or agent configured.")
 
 
 # ── Output Types (M7) ─────────────────────────────────────────────────────────

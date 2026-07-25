@@ -6,7 +6,7 @@ from .schemas import (
     AgentVerificationResponse,
     LLMProviders,
 )
-from .routers import embed, trigger
+from .routers import embed, trigger, test
 import litellm
 
 app = FastAPI(title="NeuralOps nexus-ai", version="1.0.0")
@@ -14,6 +14,7 @@ app = FastAPI(title="NeuralOps nexus-ai", version="1.0.0")
 # ── Internal routers (called by nexus-nucleus only) ───────────────────────────
 app.include_router(embed.router)
 app.include_router(trigger.router)
+app.include_router(test.router)
 
 
 # ── Existing model/agent verification endpoints ───────────────────────────────

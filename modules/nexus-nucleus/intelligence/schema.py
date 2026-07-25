@@ -26,6 +26,19 @@ class AIModelIn(Schema):
     config: dict = {}
 
 
+class AIModelPatchIn(Schema):
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    model_id: Optional[str] = None
+    description: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    context_window: Optional[int] = None
+    supports_tools: Optional[bool] = None
+    supports_vision: Optional[bool] = None
+    config: Optional[dict] = None
+
+
 class AIModelOut(Schema):
     id: str
     name: str
@@ -156,6 +169,48 @@ class AIRequestLogOut(Schema):
     status: str
     error: Optional[str] = None
     created_at: str
+
+
+# ── AIAgent ──────────────────────────────────────────────────────────────────
+
+class AgentIn(Schema):
+    name: str
+    description: Optional[str] = None
+    agent_type: str = "internal"          # "internal" | "external"
+    model_id: Optional[str] = None        # required for internal
+    mcp_server_id: Optional[str] = None   # optional for internal
+    external_url: Optional[str] = None    # required for external
+    api_key: Optional[str] = None         # optional external auth key
+    system_prompt: Optional[str] = None
+    safety_mode: bool = True
+    max_steps: int = 5
+    allow_parallel_tools: bool = False
+
+
+class AgentOut(Schema):
+    id: str
+    name: str
+    description: Optional[str] = None
+    agent_type: str
+    model_id: Optional[str] = None
+    mcp_server_id: Optional[str] = None
+    external_url: Optional[str] = None
+    system_prompt: Optional[str] = None
+    safety_mode: bool
+    max_steps: int
+    allow_parallel_tools: bool
+    has_api_key: bool
+    is_active: bool
+
+
+# ── Test results ──────────────────────────────────────────────────────────────
+
+class TestResultOut(Schema):
+    ok: bool
+    response: Optional[str] = None
+    tools: list[str] = []
+    latency_ms: int = 0
+    error: Optional[str] = None
 
 
 class CompanyAIConfigIn(Schema):

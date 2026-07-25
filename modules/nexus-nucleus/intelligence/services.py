@@ -34,6 +34,21 @@ def create_ai_model(company, user, data: dict) -> "AIModel":
     return model
 
 
+def patch_ai_model(company, model_id: str, data: dict) -> "AIModel | None":
+    from nucleus.models import AIModel
+    model = AIModel.objects.filter(company=company, id=model_id, is_active=True).first()
+    if not model:
+        return None
+    api_key = data.pop("api_key", None)
+    if api_key:
+        model.set_api_key(api_key)
+    for field, value in data.items():
+        if value is not None:
+            setattr(model, field, value)
+    model.save()
+    return model
+
+
 def delete_ai_model(company, model_id: str) -> bool:
     from nucleus.models import AIModel
     model = AIModel.objects.filter(company=company, id=model_id, is_active=True).first()
@@ -82,6 +97,68 @@ def delete_mcp_server(company, ai_model_id: str, server_id: str) -> bool:
         agents__model__id=ai_model_id,
         is_active=True,
     ).first()
+    if not server:
+        return False
+    server.soft_delete()
+    return True
+
+
+# ── AIAgent ──────────────────────────────────────────────────────────────────
+
+def list_agents(company):
+    from nucleus.models import AIAgent
+    return AIAgent.objects.filter(
+        company=company, is_active=True
+    ).select_related("model", "mcp_server").order_by("name")
+
+
+def get_agent(company, agent_id: str):
+    from nucleus.models import AIAgent
+    return AIAgent.objects.filter(
+        company=company, id=agent_id, is_active=True
+    ).select_related("model", "mcp_server").first()
+
+
+def create_agent(company, data: dict) -> "AIAgent":
+    from nucleus.models import AIAgent, AIModel, MCPServer
+    api_key = data.pop("api_key", None)
+    model_id = data.pop("model_id", None)
+    mcp_server_id = data.pop("mcp_server_id", None)
+
+    model = AIModel.objects.filter(company=company, id=model_id, is_active=True).first() if model_id else None
+    mcp_server = MCPServer.objects.filter(company=company, id=mcp_server_id, is_active=True).first() if mcp_server_id else None
+
+    agent = AIAgent(company=company, model=model, mcp_server=mcp_server, **data)
+    if api_key:
+        agent.set_api_key(api_key)
+    agent.save()
+    return agent
+
+
+def delete_agent(company, agent_id: str) -> bool:
+    from nucleus.models import AIAgent
+    agent = AIAgent.objects.filter(company=company, id=agent_id, is_active=True).first()
+    if not agent:
+        return False
+    agent.soft_delete()
+    return True
+
+
+# ── Standalone MCPServer ───────────────────────────────────────────────────
+
+def list_all_mcp_servers(company):
+    from nucleus.models import MCPServer
+    return MCPServer.objects.filter(company=company, is_active=True).order_by("name")
+
+
+def create_standalone_mcp_server(company, data: dict) -> "MCPServer":
+    from nucleus.models import MCPServer
+    return MCPServer.objects.create(company=company, **data)
+
+
+def delete_standalone_mcp_server(company, server_id: str) -> bool:
+    from nucleus.models import MCPServer
+    server = MCPServer.objects.filter(company=company, id=server_id, is_active=True).first()
     if not server:
         return False
     server.soft_delete()

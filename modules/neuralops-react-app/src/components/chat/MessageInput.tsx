@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Paperclip, Send, X, UserPlus, FileText,
   BarChart2, Code, Globe, Terminal, Table2, GitBranch, ClipboardList, AlignLeft,
+  Bot, Server, Cpu, User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -9,6 +10,11 @@ import { inviteToProject } from "@/services/workspace.service";
 import { changeUsername } from "@/services/auth.service";
 import { attachFileContext } from "@/services/context.service";
 import { listPersonas } from "@/services/personas.service";
+import {
+  SlashCommandPanel,
+  CONFIG_COMMANDS,
+  type SlashCommandName,
+} from "./slash-commands/SlashCommandPanel";
 
 // Context directives shown in the @mention dropdown
 const CONTEXT_DIRECTIVES = [
@@ -46,6 +52,15 @@ const SLASH_COMMANDS = [
     usage: "/changeusername newname",
     icon: UserPlus,
   },
+  // M9 config commands — open inline panel
+  { command: "/add_model",     description: "Add an AI model (OpenAI, Anthropic, Ollama…)",   usage: "/add_model",     icon: Cpu },
+  { command: "/add_mcp",       description: "Add an MCP server (tools provider)",               usage: "/add_mcp",       icon: Server },
+  { command: "/add_agent",     description: "Add an agent (internal with tools or external)",   usage: "/add_agent",     icon: Bot },
+  { command: "/add_persona",   description: "Add a persona that you can @mention in chat",     usage: "/add_persona",   icon: User },
+  { command: "/list_models",   description: "List all configured AI models",                   usage: "/list_models",   icon: Cpu },
+  { command: "/list_mcp",      description: "List all configured MCP servers",                  usage: "/list_mcp",      icon: Server },
+  { command: "/list_agents",   description: "List all configured agents",                       usage: "/list_agents",   icon: Bot },
+  { command: "/list_personas", description: "List all personas available in chat",              usage: "/list_personas", icon: User },
 ];
 
 export function MessageInput({
@@ -70,6 +85,8 @@ export function MessageInput({
   const [inviting, setInviting] = useState(false);
   const [uploadingContext, setUploadingContext] = useState(false);
   const [personas, setPersonas] = useState<{ id: string; name: string }[]>([]);
+  // M9: active config command panel
+  const [activeCommand, setActiveCommand] = useState<SlashCommandName | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contextFileInputRef = useRef<HTMLInputElement>(null);
@@ -159,6 +176,13 @@ export function MessageInput({
   }
 
   function pickSlashCommand(command: string) {
+    // M9: config commands open the panel, not paste into textarea
+    if (CONFIG_COMMANDS.includes(command as SlashCommandName)) {
+      setActiveCommand(command as SlashCommandName);
+      setText("");
+      setSlashOpen(false);
+      return;
+    }
     setText(command + " ");
     setSlashOpen(false);
     textareaRef.current?.focus();
@@ -261,6 +285,13 @@ export function MessageInput({
       return;
     }
 
+    // M9: config slash commands open panel
+    if (CONFIG_COMMANDS.includes(trimmed as SlashCommandName)) {
+      setActiveCommand(trimmed as SlashCommandName);
+      setText("");
+      return;
+    }
+
     if (trimmed.startsWith("/") && !trimmed.includes(" ")) {
       toast.info(`Unknown command: ${trimmed}`);
       return;
@@ -302,6 +333,17 @@ export function MessageInput({
 
   return (
     <div className="relative border-t border-sidebar-border bg-sidebar px-3 py-3">
+      {/* M9: Slash command config panel */}
+      {activeCommand && (
+        <SlashCommandPanel
+          command={activeCommand}
+          onClose={() => {
+            setActiveCommand(null);
+            textareaRef.current?.focus();
+          }}
+        />
+      )}
+
       {file && (
         <div className="mb-2 inline-flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1 text-xs">
           <span className="max-w-[240px] truncate">{file.name}</span>
