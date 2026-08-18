@@ -226,6 +226,19 @@ def _ensure_postgres_running(timeout_seconds: int = 30) -> None:
 
     if not (POSTGRES_DATA_DIR / "PG_VERSION").exists():
         print("Initializing Postgres data directory...")
+        # Dockerfile.base bakes `chown postgres:postgres` onto this path
+        # at image-build time, but that only survives into a *named*
+        # volume (Docker copies the image directory's content+ownership
+        # into a named volume on first use). A bind-mounted host
+        # directory overlays the mount as-is instead -- freshly created
+        # by `docker run`, it comes out owned by root on the host, which
+        # made initdb's internal `chmod 0700` fail with "Operation not
+        # permitted" (the `postgres` user below is neither root nor the
+        # owner). Fixing ownership here unconditionally -- this script
+        # always runs as root via plain `docker exec` -- makes init-db
+        # work the same whether POSTGRES_DATA_DIR is a named volume or a
+        # bind mount, instead of silently depending on which one you pick.
+        subprocess.run(["chown", "-R", "postgres:postgres", str(POSTGRES_DATA_DIR)], check=True)
         result = _su_postgres(f"{pg_bin}/initdb -D {POSTGRES_DATA_DIR}")
         if result.returncode != 0:
             print(f"ERROR: initdb failed\n{result.stderr}", file=sys.stderr)
