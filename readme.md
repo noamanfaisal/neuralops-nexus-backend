@@ -286,5 +286,6 @@ Want to run from source, dig into how the system is put together, or send a pull
 | [`story/`](./story) | Deep-dive narratives on specific subsystems (auth architecture, permissions model, owner setup) |
 | [`TASKS.md`](./TASKS.md) | Full development task history + known gotchas |
 | [`neuralops-backend-api-catalog.md`](./neuralops-backend-api-catalog.md) | Full REST + internal API reference |
+| [`CONCEPTS-AND-ROLES.md`](./CONCEPTS-AND-ROLES.md) | Every core object (Company, Project, Channel, Topic, User, AI Model, Agent, MCP Server, Context, Knowledge Base) — philosophy + Django model — plus the full permissions/role hierarchy |
 
 > **Branch notice:** `dev` is the active development branch — clone and build from it. `master`/`main` may lag behind.
