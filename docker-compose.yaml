@@ -191,6 +191,17 @@ services:
     environment:
       - CHROMA_HOST=chromadb-dev
       - CHROMA_PORT=8000
+      # pgvector is Settings.VECTOR_STORE's default (apps/core/config.py),
+      # and PgVectorStore connects to the SAME Postgres nucleus-dev uses --
+      # these were missing entirely, so it fell back to Settings' bare
+      # defaults (POSTGRES_HOST="postgres", POSTGRES_DB/USER/PASSWORD=""),
+      # and "postgres" isn't a real service name in this compose file
+      # (it's postgres-dev) -- hence the DNS resolution failure.
+      - POSTGRES_HOST=postgres-dev
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${DEV_POSTGRES_DB}
+      - POSTGRES_USER=${DEV_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${DEV_POSTGRES_PASSWORD}
       - OPENAI_API_KEY=${DEV_OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${DEV_ANTHROPIC_API_KEY}
       - LLM_MODEL=${DEV_LLM_MODEL:-anthropic/claude-haiku-4-5-20251001}
@@ -206,6 +217,7 @@ services:
     depends_on:
       - chromadb-dev
       - nucleus-dev
+      - postgres-dev
 
   realtime-dev:
     image: noamanfaisal/nexus-transport:6.0
@@ -393,6 +405,14 @@ services:
     environment:
       - CHROMA_HOST=chromadb-fat
       - CHROMA_PORT=8000
+      # Same fix as nexus-ai-dev -- these were missing, so PgVectorStore
+      # fell back to Settings' bare defaults (POSTGRES_HOST="postgres",
+      # not a real service name here -- it's postgres-fat).
+      - POSTGRES_HOST=postgres-fat
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${FAT_POSTGRES_DB}
+      - POSTGRES_USER=${FAT_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${FAT_POSTGRES_PASSWORD}
       - OPENAI_API_KEY=${FAT_OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${FAT_ANTHROPIC_API_KEY}
       - LLM_MODEL=${FAT_LLM_MODEL:-anthropic/claude-haiku-4-5-20251001}
@@ -406,6 +426,7 @@ services:
     depends_on:
       - chromadb-fat
       - nucleus-fat
+      - postgres-fat
 
   realtime-fat:
     image: noamanfaisal/nexus-transport:6.0
