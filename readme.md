@@ -289,3 +289,15 @@ Want to run from source, dig into how the system is put together, or send a pull
 | [`CONCEPTS-AND-ROLES.md`](./CONCEPTS-AND-ROLES.md) | Every core object (Company, Project, Channel, Topic, User, AI Model, Agent, MCP Server, Context, Knowledge Base) — philosophy + Django model — plus the full permissions/role hierarchy |
 
 > **Branch notice:** `dev` is the active development branch — clone and build from it. `master`/`main` may lag behind.
+
+---
+
+## License
+
+The NeuralOps Nexus **Community/Freemium core** — everything in this repository — is licensed under the **[GNU Affero General Public License v3.0](./LICENSE)** (AGPL-3.0).
+
+In short: you're free to self-host, use, study, modify, and redistribute this code, including for commercial purposes — but if you modify it and run it as a network service for others, the AGPL requires you to make your modified source available to those users under the same license. This keeps the project's improvements open for everyone, including improvements made by companies offering it as a hosted service.
+
+NeuralOps' own **SaaS** and **Enterprise** offerings include additional proprietary features and are licensed separately — that code is not published in this repository and is not covered by the AGPL-3.0 license above.
+
+See the [`LICENSE`](./LICENSE) file for the full legal text.
