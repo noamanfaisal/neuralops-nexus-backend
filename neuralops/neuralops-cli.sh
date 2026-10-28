@@ -188,3 +188,38 @@ case "${1:-help}" in
     echo
     ;;
 esac
+WHAT WE'RE BUILDING
+A one-command installer, so anyone can install NeuralOps on a Linux machine with one line:
+  curl -fsSL https://get.neuralopsnexus.ai | bash
+After that, a tool that lets us spin up demo servers on AWS / Google / Azure in one click for people who request a demo.
+
+WHERE TO GET THE CODE
+Repo: github.com/noamanfaisal/neuralops-nexus-backend
+Branch: step8-switchover
+(Tell me your GitHub username if you need access.)
+
+READ THESE, IN THIS ORDER
+1. docs/EASY-INSTALL-TASKS.md: your work list. Every task says exactly what to build, which files to touch, and how I'll check it.
+2. docs/EASY-INSTALL.md: the full design and background.
+3. install.sh and neuralops/neuralops-cli.sh: the first version is already written. You're improving it, not starting from zero.
+
+WHAT TO DO FIRST (Step 1)
+- Task 1.1: replace the Cloudflare tunnel with Tailscale (Funnel by default).
+- Task 1.2: make a half-finished install resume when it's run again.
+Then 1.3 (short address) and 1.4 (docs). Step 2 (demo servers) comes later, once we have cloud credits. Task 2.1 can be done earlier if you finish Step 1.
+
+HOW TO TEST
+Use a fresh Ubuntu 24.04 machine or VM with 4 GB+ of memory, and run the installer from your local copy:
+  NEURALOPS_RAW=file:///path/to/your/clone bash install.sh
+The scripts must pass shellcheck with no warnings.
+
+RULES THAT MATTER MOST
+- Never regenerate or overwrite secrets.env.
+- Never use docker compose down -v.
+- Messages in the installer are for non-technical people: short and clear.
+- If something isn't covered in the docs, ask me. Please don't guess. The open decisions are listed at the end of the tasks doc.
+
+HOW WE WORK
+You build a task and push it to a branch, then tell me. I run the checks in that task's Proof section, and once they pass, we move to the next task.
+
+Thanks!

@@ -137,6 +137,33 @@ easy-install-and-free-trial-plan.
   reply unless it was; (2) a check — a reply that names a tool as run with no
   matching tool call in the run gets flagged (or the claim stripped). Ties to
   the memory-pass hardening family.
+- **BUG — approval pauses fail once a run has read large tool output
+  ("Nothing is waiting on this message").** Found live 2026-10-27 with the
+  Dashboard persona (aaf-analytics tools on Ask): the first pauses saved
+  (201), then a pause after two or three query results was refused by
+  nucleus — `RequestDataTooBig: Request body exceeded
+  settings.DATA_UPLOAD_MAX_MEMORY_SIZE` → 500 on
+  `/api/v1/internal/messages/<id>/pause/` → the engine job failed
+  (ai_system.respond → save_pause raise_for_status) while the approval card
+  stayed on screen → every Allow/Deny answered 409 Conflict. CAUSE:
+  `core/settings.py` sets `DATA_UPLOAD_MAX_MEMORY_SIZE = 64 * 1024`
+  GLOBALLY — its comment says it is for the public hook endpoint
+  (scheduling/hooks_api.py), but it also caps every internal engine→nucleus
+  POST, and a pause carries the whole run so far (history + tool results).
+  Usage / AI-request-log posts can hit the same wall. **FIX (task for the
+  owner's developer):** raise the global limit (e.g. 16 MB — the internal
+  routes are already behind the internal key and blocked at nginx), and keep
+  the hook's protection where it belongs: in the hook view, refuse a body over
+  64 KB from the Content-Length header BEFORE the body is read (413 with a
+  worded message). Tests (nucleus): a pause POST with a ~1 MB state → 201 and
+  stored intact; the public hook with a 100 KB body → 413, with a normal body
+  → still fires; an internal usage batch of ~200 KB → 201. Also worth it in
+  the same change: when the pause save fails, the engine should end the reply
+  with a clear error event so the card is withdrawn instead of left dangling.
+  Proof: Dashboard with analytics tools on Ask, several queries + approvals in
+  one reply → no 500, Allow resumes the run. WORKAROUND until then: analytics
+  tools on Auto (no pause, no problem) — recommended anyway, they are
+  read-only.
 - The aaf-analytics `neuralops` token was shown in a chat on 2026-10-27 —
   rotate it (analytics `.env` MCP_TOKENS + the NeuralOps secret + restart the
   analytics stack).
@@ -650,3 +677,59 @@ lesson 14) and rebuild the image — fold into the next image build.
   button exists. Owner to rule if Save should also lock.)
 - gpt-5.x pricing rows in the price catalog — watch the Usage page's
   unpriced_rows (≥) on new models; the catalog refresh task may lag new ids.
+
+- **BUG (found live 2026-10-27, @Dashboard + aaf-analytics): a chart after a
+  tool call arrives as raw text.** The persona wrote a sentence ("I'll pull
+  the revenue report…"), called the tool, then wrote `<<<OUTPUT:chart>>>` +
+  a VALID chart description. The bubble showed it all as text, and the
+  markdown renderer turned `<OUTPUT:chart>` into a link (CommonMark reads
+  `<scheme:path>` as an autolink), so it showed as `<<[OUTPUT:chart](…/w)>>`.
+  Likely cause: `_OUTPUT_RE` in
+  `modules/nexus-ai/ai_engine/output_types/markers.py` only accepts an
+  opener at the START of a line, and the text before and after the tool call
+  is joined with no line break, so the marker sits mid-line and is ignored;
+  `recover_unmarked` then refuses it too, because prose surrounds the JSON.
+  FIX (for the developer):
+  1. Where the run's text parts are joined into the final reply, join the
+     part after a tool call to the part before it with a line break.
+  2. In `parse_output_markers`, also accept an opener that comes straight
+     after sentence-ending punctuation (`.`, `!`, `?`, `:`) — still refuse
+     one inside a sentence. Keep the prose before the marker as a lead-in
+     line rather than throwing it away (the frontend already shows prose +
+     fenced chart this way: `findFencedChart`).
+  3. Frontend safety net: never render `<OUTPUT:...>` / `<<<END_OUTPUT>>>`
+     as links; strip stray markers from text bubbles.
+  Tests: a reply "Sentence.<<<OUTPUT:chart>>>{…}<<<END_OUTPUT>>>" ends as
+  type chart with the sentence kept; a sentence that only MENTIONS the
+  marker stays text. Workaround today: the persona prompt says no text
+  before tool calls on a chart answer.
+  SEEN AGAIN 2026-10-27 20:49 with `<<OUTPUT:table>>` after "I need to run
+  the daily dashboard data pulls fresh in this reply." — a whole HTML
+  dashboard shown as raw code. Not chart-only: every marker type is hit, so
+  fix 1 + 2 must cover html/table/form too, not just chart.
+  ROOT CAUSE, most likely (seen 20:52): the sentence before the marker is the
+  ROUTER's text. Reply shown: "I can't produce this dashboard in this pass —
+  I have no analytics tools here, so I'd be inventing the numbers. Handing
+  it to the model that can run the pulls.I'll start with the schema…" — the
+  routing run streamed prose AND returned Escalate (ROUTER_INSTRUCTIONS says
+  "never answer AND escalate", the model did both), and that prose stays in
+  the reply, glued to the standard run's text with no line break. FIX 0
+  (do first): when the routing run ends in Escalate, throw away any text it
+  streamed (clear it from the bubble and from the saved reply); the user
+  should only see the escalated run's answer. Test: a routing run that
+  streams "Handing it over." then returns Escalate leaves no trace of that
+  sentence in the final message.
+
+- **BUG (found live 2026-10-27): the persona's "Default answer format" is
+  ignored.** @Analyst is set to Text, yet "@Analyst how did revenue this
+  month compare with September, per currency?" came back as a chart.
+  `_resolve_name` in `modules/nexus-ai/ai_engine/output_types/resolver.py`
+  only looks at (1) an explicit @chart-style directive in the message, then
+  (2) the classifier on the message words ("compare" → chart). The persona
+  setting is never consulted.
+  FIX (for the developer): pass the persona's default format into
+  `resolve_output_spec` and use the order: directive in the message →
+  persona default (when it is not Auto) → classifier → text. A persona set
+  to Auto keeps today's behaviour. Tests: Text persona + "compare X with Y"
+  → text; same persona + "@chart" → chart; Auto persona → classifier.
+  Workaround today: add `@text` to the message.
