@@ -102,6 +102,45 @@ easy-install-and-free-trial-plan.
   docs/EASY-INSTALL.md. Open: demo length, demo content, max demos at once,
   DNS provider, how the link is sent, first cloud.
 
+**FOUND 2026-10-27 (connecting the aaf-analytics MCP to an Analyst persona):**
+- **BUG — MCP tokens are sent WITHOUT "Bearer " (affects EVERY authenticated
+  MCP server: static secrets AND OAuth).** pydantic-ai 2.55's `MCP` capability
+  (the engine always uses its local path — `native` defaults to False) copies
+  `authorization_token` VERBATIM into the `Authorization` header
+  (pydantic_ai/capabilities/mcp.py `_build_local`). The engine passes the raw
+  secret (toolset_builder.py `_bearer_token`), so servers receive
+  `Authorization: <token>` and refuse it ("missing or invalid bearer token").
+  Verified live: same token, both sides matching by hash, refused until the
+  secret was saved as `Bearer <token>` by hand — then it worked. Servers
+  without auth (Shop-Demo) were never affected, which is why it went unseen.
+  **FIX (task for the owner's developer):** in
+  `modules/nexus-ai/ai_engine/pydantic_ai_system/tools/toolset_builder.py`,
+  `_bearer_token` returns `"Bearer " + token` (token stripped) unless the value
+  already starts with `bearer ` (any letter case); empty/missing → None. Same
+  for the oauth2 branch. Existing secrets saved with a manual `Bearer ` keep
+  working (no double prefix). Tests (engine, tests/test_mcp_dial.py): raw →
+  `Bearer raw` · `Bearer raw` unchanged · `bearer raw` unchanged · padded
+  `  raw  ` → `Bearer raw` · empty/None → None · oauth2 token → prefixed; plus
+  one dial test where the fake MCP server asserts the header it received is
+  `Bearer <token>`. Optional UI hint under the Secret field: "Paste the token
+  only — NeuralOps adds 'Bearer' itself." Proof: engine suite green at +N;
+  re-save the aaf-analytics secret WITHOUT `Bearer ` → a new topic → the
+  Analyst's tool calls succeed. (Follow-up worth noting: servers that want a
+  different header, e.g. `X-API-Key`, are not supported yet.)
+- **HONESTY SLIP — a reply claimed a tool attempt that never happened.** After
+  three real auth failures in one topic, the Analyst (answered by DeepSeek)
+  twice wrote "Attempted now: aaf_analytics__get_schema → missing or invalid
+  bearer token" with NO tool call behind it (no tool row in the chat; the
+  analytics server log shows no call). A fresh topic fixed it. The engine's
+  honesty rule covers invented tool RESULTS but not invented tool ATTEMPTS.
+  To design: (1) prompt rule — never say a tool was called/attempted in this
+  reply unless it was; (2) a check — a reply that names a tool as run with no
+  matching tool call in the run gets flagged (or the claim stripped). Ties to
+  the memory-pass hardening family.
+- The aaf-analytics `neuralops` token was shown in a chat on 2026-10-27 —
+  rotate it (analytics `.env` MCP_TOKENS + the NeuralOps secret + restart the
+  analytics stack).
+
 **Stage 4 — post-release build queue (details in "Post-test build queue"
 below). SCHEDULE AGREED 2026-10-23 evening (owner: "i need these things to
 be done asap"; each item ships as its own point release when done, the
