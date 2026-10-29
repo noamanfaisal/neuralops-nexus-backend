@@ -15,12 +15,20 @@ import logging
 
 from django.http import JsonResponse
 from ninja import Router
+from pydantic import ValidationError
 
 from scheduling import hooks as hook_svc
 from scheduling.hooks import HookError
 from scheduling.schema import HookFireIn
 
 logger = logging.getLogger(__name__)
+
+# This endpoint's own body wall. The global DATA_UPLOAD_MAX_MEMORY_SIZE was
+# raised to 16 MB for the internal engine routes (the pause bug,
+# docs/MISSING.md 2026-10-27), so the one PUBLIC write path protects itself:
+# 64 KB is well over the 4 KB of text + 32 KB of data a fire may carry, and
+# far under what an unauthenticated caller may make this process parse.
+HOOK_MAX_BODY_BYTES = 64 * 1024
 
 # No auth= : the token in the path is the credential.
 router = Router(tags=["Inbound hooks"])
@@ -34,8 +42,27 @@ def _answer(status: int, detail: str) -> JsonResponse:
 
 
 @router.post("/{token}/")
-async def fire_hook(request, token: str, payload: HookFireIn):
-    """POST /api/v1/hooks/{token}/ -- the persona answers in the hook's chat."""
+async def fire_hook(request, token: str):
+    """POST /api/v1/hooks/{token}/ -- the persona answers in the hook's chat.
+
+    The body is parsed HERE, not by the router, so the size wall stands in
+    front of the parse: the Content-Length header is judged first (a liar or
+    a chunked body is caught by the read length right after), and only then
+    is the JSON read. 413 carries no hint of whether the hook exists."""
+    declared = request.headers.get("Content-Length")
+    try:
+        if declared is not None and int(declared) > HOOK_MAX_BODY_BYTES:
+            return _answer(413, "The body is too large. A fire carries at most 64 KB.")
+    except (TypeError, ValueError):
+        pass  # an unreadable header is judged by the body length below
+    body = request.body
+    if len(body) > HOOK_MAX_BODY_BYTES:
+        return _answer(413, "The body is too large. A fire carries at most 64 KB.")
+    try:
+        payload = HookFireIn.model_validate_json(body or b"{}")
+    except ValidationError:
+        return _answer(422, "The body must be a JSON object like {\"text\": \"...\", \"data\": {...}}.")
+
     from asgiref.sync import sync_to_async
 
     # The lookup is inside the try as well: an error raised there would otherwise

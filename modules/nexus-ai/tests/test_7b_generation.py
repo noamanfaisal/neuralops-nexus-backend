@@ -64,3 +64,34 @@ def test_7b2_an_older_nucleus_falls_back_to_the_persona_legacy_numbers():
     # The legacy persona-level fields still carry the same values.
     assert persona.max_output_tokens == 4096
     assert persona.temperature == 0.3
+
+
+# ── B8 (fix round 2026-10-28): Anthropic prompt caching ──────────────────────
+# Found live 2026-10-27: claude-sonnet-5-5 was 83% of the project's cost with
+# ZERO cached tokens — the engine never asked Anthropic to cache, so every
+# call re-paid the whole history. The builder now sets anthropic_cache (one
+# automatic, forward-moving cache breakpoint) on Anthropic specs only.
+
+from ai_engine.pydantic_ai_system.agent_builder import AgentBuilder  # noqa: E402
+from ai_engine.pydantic_ai_system.model_factory import ModelFactory  # noqa: E402
+
+
+def _agent_for(model: dict):
+    persona = persona_from(_persona(model=model), company_id="c1", project_id="p1")
+    return AgentBuilder(ModelFactory()).build(persona, ModelRole.STANDARD, "You answer.")
+
+
+def test_b8_claude_runs_ask_for_prompt_caching():
+    agent = _agent_for(_model("claude-sonnet-5-5", provider="anthropic",
+                              qualified_id="anthropic:claude-sonnet-5-5",
+                              max_output_tokens=16000, temperature=0.7))
+    settings = agent.model_settings or {}
+    assert settings.get("anthropic_cache") is True
+    # The 7b numbers still ride along unchanged.
+    assert settings["temperature"] == 0.7
+    assert settings["max_tokens"] == 16000
+
+
+def test_b8_other_providers_get_no_anthropic_setting():
+    agent = _agent_for(_model("gpt-4o", max_output_tokens=16000, temperature=0.7))
+    assert "anthropic_cache" not in (agent.model_settings or {})

@@ -103,6 +103,9 @@ class ModelConfigOut(Schema):
     config: dict
     is_active: bool
     has_api_key: bool
+    # Save-lock (ruling 2026-10-28): when the STORED values last passed a
+    # provider check; null = never (the Edit dialog locks Save). ISO string.
+    last_check_ok_at: Optional[str] = None
     # This config is the server's utility model (one per server, see CompanyAIConfig).
     is_utility: bool = False
     # Projects this config is attached to (visibility gate) -- lets clients

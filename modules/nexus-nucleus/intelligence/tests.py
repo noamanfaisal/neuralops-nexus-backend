@@ -845,3 +845,98 @@ class CatalogSeedTests(TestCase):
         self.assertIn("Seeded 2 new catalog rows", self.run_cmd())
         row = ModelPrice.objects.get(provider="deepseek", model_id="deepseek-chat")
         self.assertEqual((row.context_window, row.max_output_tokens), (131072, 8192))
+
+
+class SaveLockTests(MentionRightFixture):
+    """
+    Save-lock (owner's ruling 2026-10-28, MISSING.md B14): the Edit dialog
+    locks Save until the model has passed a check, so the row must remember
+    one. last_check_ok_at is SET only by the check endpoint, and only when the
+    values just checked are exactly the stored ones; a reach-changing PATCH
+    (provider, model id, api_base, key) clears it; ordinary edits keep it.
+    """
+
+    def check(self, body, worker=None):
+        from unittest.mock import MagicMock, patch
+        response = MagicMock(status_code=200)
+        response.json.return_value = worker or {"ok": True, "latency_ms": 100}
+        response.raise_for_status.return_value = None
+        with patch("intelligence.services.httpx.post", return_value=response):
+            with self.settings(NEXUS_AI_URL="http://worker.test", INTERNAL_API_KEY="k"):
+                return self.call("post", "/api/v1/model-configs/check/", self.owner, body)
+
+    def stamp(self):
+        from django.utils import timezone
+        self.model_config.last_check_ok_at = timezone.now()
+        self.model_config.save(update_fields=["last_check_ok_at"])
+
+    def row(self):
+        r = self.call("get", "/api/v1/model-configs/", self.owner)
+        return next(m for m in r.json() if m["id"] == str(self.model_config.id))
+
+    def test_a_passing_check_of_the_stored_values_stamps_the_row(self):
+        self.assertIsNone(self.row()["last_check_ok_at"])  # never checked yet
+        r = self.check({"provider": "openai", "model_id": "gpt-test", "config_id": str(self.model_config.id)})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["ok"])
+        self.model_config.refresh_from_db()
+        self.assertIsNotNone(self.model_config.last_check_ok_at)
+        self.assertEqual(self.row()["last_check_ok_at"], self.model_config.last_check_ok_at.isoformat())
+
+    def test_a_pre_save_check_of_edited_values_never_stamps(self):
+        cid = str(self.model_config.id)
+        # A different model id: passing proves nothing about the stored row.
+        self.check({"provider": "openai", "model_id": "gpt-next", "config_id": cid})
+        # A new key typed into the dialog: same thing.
+        self.check({"provider": "openai", "model_id": "gpt-test", "api_key": "sk-new", "config_id": cid})
+        # No config_id at all (the Register dialog's pre-save check).
+        self.check({"provider": "openai", "model_id": "gpt-test", "api_key": "sk-new"})
+        self.model_config.refresh_from_db()
+        self.assertIsNone(self.model_config.last_check_ok_at)
+
+    def test_a_failing_check_never_stamps(self):
+        r = self.check(
+            {"provider": "openai", "model_id": "gpt-test", "config_id": str(self.model_config.id)},
+            worker={"ok": False, "error_code": "model_failure", "status_code": 401, "error": "bad key"},
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertFalse(r.json()["ok"])
+        self.model_config.refresh_from_db()
+        self.assertIsNone(self.model_config.last_check_ok_at)
+
+    def test_ordinary_edits_keep_the_stamp_and_reach_changes_clear_it(self):
+        path = f"/api/v1/model-configs/{self.model_config.id}/"
+        # Name and routing notes are not reach: the stamp survives.
+        self.stamp()
+        r = self.call("patch", path, self.owner, {"name": "GPT Renamed", "routing_notes": "fast"})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIsNotNone(r.json()["last_check_ok_at"])
+        # Re-sending the SAME provider changes nothing, so it is not a reach change.
+        r = self.call("patch", path, self.owner, {"provider": "openai"})
+        self.assertIsNotNone(r.json()["last_check_ok_at"])
+        # A new model id is a reach change: cleared until a fresh check passes.
+        r = self.call("patch", path, self.owner, {"model_id": "gpt-test-2"})
+        self.assertIsNone(r.json()["last_check_ok_at"])
+        # A new key too.
+        self.stamp()
+        r = self.call("patch", path, self.owner, {"api_key": "sk-rotated"})
+        self.assertIsNone(r.json()["last_check_ok_at"])
+        # Re-saving the SAME key reaches nothing new: the stamp survives.
+        self.stamp()
+        r = self.call("patch", path, self.owner, {"api_key": "sk-rotated"})
+        self.assertIsNotNone(r.json()["last_check_ok_at"])
+        # A new api_base is a reach change.
+        r = self.call("patch", path, self.owner, {"api_base": "http://proxy.test/v1"})
+        self.assertIsNone(r.json()["last_check_ok_at"])
+
+    def test_the_full_edit_round_trip_relocks_then_a_fresh_check_unlocks(self):
+        # The dialog's own order: reach change saved -> cleared; then the
+        # post-save check of the (new) stored values -> stamped again.
+        self.stamp()
+        path = f"/api/v1/model-configs/{self.model_config.id}/"
+        r = self.call("patch", path, self.owner, {"model_id": "gpt-test-2", "api_key": "sk-rotated"})
+        self.assertIsNone(r.json()["last_check_ok_at"])
+        r = self.check({"provider": "openai", "model_id": "gpt-test-2", "config_id": str(self.model_config.id)})
+        self.assertTrue(r.json()["ok"])
+        self.model_config.refresh_from_db()
+        self.assertIsNotNone(self.model_config.last_check_ok_at)

@@ -94,6 +94,7 @@ def _model_config_out(config, utility_id: str | None = None) -> ModelConfigOut:
         config=config.config,
         is_active=config.is_active,
         has_api_key=bool(config.api_key_encrypted),
+        last_check_ok_at=config.last_check_ok_at.isoformat() if config.last_check_ok_at else None,
         project_ids=[
             str(pid) for pid in config.projects.filter(is_active=True).values_list("id", flat=True)
         ],

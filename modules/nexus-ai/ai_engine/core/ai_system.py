@@ -36,6 +36,7 @@ from ai_engine.context.budget import BudgetFitter, budget_for
 from ai_engine.context.context_builder import ContextBuilder
 from ai_engine.context.history_policy import HistoryPolicy
 from ai_engine.core.config import EngineSettings
+from ai_engine.core.honesty import honesty_note, phantom_tool_claims
 from ai_engine.core.nucleus_client import NucleusClient
 from ai_engine.core.turn_rules import (
     acts_with_tools,
@@ -75,6 +76,12 @@ from fastapi_app.contracts.trigger import (
 )
 
 log = logging.getLogger(__name__)
+
+
+class PauseSaveFailed(RuntimeError):
+    """A pause whose state could not be saved — resuming is impossible, so the
+    reply ends with THIS worded error (never the raw transport text, which
+    nucleus's reason mapper would misread as a model-provider failure)."""
 
 
 class AISystem(Protocol):
@@ -211,8 +218,13 @@ class PydanticAISystem:
             if preflight_turn:
                 resolved_type, resolved_spec = "preflight", OutputTypeRegistry.get("preflight")
             else:
+                # The persona's own default answer format rides along: a
+                # directive in the message wins, the default beats the
+                # classifier, "auto" keeps today's classify-then-text road
+                # (found ignored live 2026-10-27, docs/MISSING.md).
                 resolved_type, resolved_spec = await resolve_output_spec(
-                    job.output_type, job.message, bundle.history)
+                    job.output_type, job.message, bundle.history,
+                    persona_default=persona.output_type)
             block = output_instruction_block(
                 resolved_spec.system_instruction if resolved_spec else None)
             if block:
@@ -374,11 +386,25 @@ class PydanticAISystem:
             if pause is not None:
                 # Item 2: the paused run. State FIRST (a decision must never
                 # race an unsaved pause), then the final event. A failed save
-                # is a real error — resuming would be impossible.
-                await self._nucleus.save_pause(
-                    job.msg_id, job.job_id, job.topic_id, job.persona_id, pause,
-                    role=reply_role.value,
-                )
+                # is a real error — resuming would be impossible — but it is
+                # OUR failure, not the model provider's: the raw httpx text
+                # ("500 Internal Server Error") used to ride out and nucleus's
+                # reason mapper blamed the provider while the approval card
+                # dangled (docs/MISSING.md, found live 2026-10-27). The worded
+                # error below is what the reader sees instead, and the reply
+                # ends cleanly so the card is withdrawn with it.
+                try:
+                    await self._nucleus.save_pause(
+                        job.msg_id, job.job_id, job.topic_id, job.persona_id, pause,
+                        role=reply_role.value,
+                    )
+                except Exception as exc:
+                    log.exception("pause save failed for %s — ending the reply instead of leaving the card dangling", job.msg_id)
+                    raise PauseSaveFailed(
+                        "Couldn't hold this step for approval — the run's state "
+                        "could not be saved on the server. Nothing was approved "
+                        "or run; mention the persona again to retry."
+                    ) from exc
                 yield AgentEvent(
                     type=AgentEventType.PAUSED,
                     id=job.msg_id,
@@ -406,6 +432,18 @@ class PydanticAISystem:
                 # IDENTICAL to the streamed deltas (T1's contract) — parsing
                 # must never trim a plain reply.
                 clean = raw
+            # B7 (honesty slip, found live 2026-10-27): a reply that names one
+            # of this persona's tools as attempted, with no such call in the
+            # run, gets a visible correction — never a silent fabrication. The
+            # detector is deliberately narrow (core/honesty.py): exact catalog
+            # names on completed-claim lines only, so honest prose is spared.
+            phantom = phantom_tool_claims(
+                clean, [entry.model_name for entry in catalog], used or [])
+            if phantom:
+                log.warning("honesty: reply %s claims un-run tool(s): %s",
+                            job.msg_id, ", ".join(phantom))
+                if final_type == "text":
+                    clean = clean.rstrip() + "\n\n" + honesty_note(phantom)
             yield AgentEvent(
                 type=AgentEventType.END,
                 id=job.msg_id,

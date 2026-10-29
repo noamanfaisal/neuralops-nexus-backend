@@ -3,6 +3,9 @@ One place that decides which output type a run uses (0.8.0, kept; history rows
 are the rebuild's HistoryMessage — role/author/text + output_type).
 
 Priority: the explicit type nucleus sends for an @chart-style directive, then
+the PERSONA'S OWN default answer format (its prompt's output_type, when it is
+not "auto" — found ignored live 2026-10-27, docs/MISSING.md: an @Analyst set
+to Text answered a "compare … per currency" question with a chart), then
 cosine classification of the message, then "text".
 
 A pick — the person's answer to a choice prompt, "@Faisal → Last 10 years" —
@@ -51,9 +54,12 @@ def request_behind_pick(message: str, history: Sequence[HistoryMessage]) -> str 
 
 
 async def resolve_output_spec(explicit: str | None, message: str,
-                              history: Sequence[HistoryMessage] = ()) -> tuple[str, OutputTypeSpec | None]:
-    """Return (type_name, spec) for this run. `explicit` is TriggerJob.output_type."""
-    name = await _resolve_name(explicit, message, history)
+                              history: Sequence[HistoryMessage] = (),
+                              persona_default: str | None = None) -> tuple[str, OutputTypeSpec | None]:
+    """Return (type_name, spec) for this run. `explicit` is TriggerJob.output_type;
+    `persona_default` is the persona's own default answer format (its prompt's
+    output_type) — it beats the classifier, never a directive in the message."""
+    name = await _resolve_name(explicit, message, history, persona_default)
     spec = OutputTypeRegistry.get(name)
     if spec is None:
         spec = OutputTypeRegistry.get(DEFAULT_TYPE)
@@ -62,12 +68,22 @@ async def resolve_output_spec(explicit: str | None, message: str,
 
 
 async def _resolve_name(explicit: str | None, message: str,
-                        history: Sequence[HistoryMessage]) -> str:
+                        history: Sequence[HistoryMessage],
+                        persona_default: str | None = None) -> str:
     if explicit and explicit != "auto":
         if OutputTypeRegistry.get(explicit):
             logger.debug("[output-type] explicit: %s", explicit)
             return explicit
         logger.warning("[output-type] unknown explicit type %r — classifying instead", explicit)
+
+    # The persona's own setting decides every turn without a directive; only
+    # "auto" (or an unknown/empty value) hands the choice to the classifier.
+    default = (persona_default or "").strip().lower()
+    if default and default != "auto":
+        if OutputTypeRegistry.get(default):
+            logger.debug("[output-type] persona default: %s", default)
+            return default
+        logger.warning("[output-type] unknown persona default %r — classifying instead", default)
 
     # Imported here, not at module scope: the classifier pulls in the embedder.
     from ai_engine.output_types import classifier

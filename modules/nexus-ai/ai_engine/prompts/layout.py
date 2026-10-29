@@ -46,14 +46,22 @@ class PromptLayout:
             # Honesty rule (live finding 2026-10-22: a persona invented date/ls
             # transcripts): tool RESULTS are the only ground truth — appended
             # after the lines so the section still starts with the same stable
-            # prefix byte-for-byte.
+            # prefix byte-for-byte. Extended 2026-10-28 (B7, live finding
+            # 2026-10-27: after real auth failures, a reply twice claimed
+            # "Attempted now: … → missing or invalid bearer token" with NO
+            # call behind it): invented ATTEMPTS are banned like invented
+            # results.
             sections.append(PromptSection(
                 kind="tool_catalog", priority=80, stable=True,
                 text="Tools available in this conversation:\n" + lines + (
                     "\nTool results are the only ground truth: never invent, "
                     "embellish or simulate a tool's output. If a call is "
                     "refused, denied or unavailable, say so plainly instead of "
-                    "imagining what it would have returned."
+                    "imagining what it would have returned. The same honesty "
+                    "covers attempts: never say a tool was called, attempted "
+                    "or failed in this reply unless that call really happened "
+                    "in this reply. An earlier reply's calls may be described "
+                    "as remembered (\"earlier we ran …\"), never as fresh."
                 ),
             ))
         return PromptPlan(instructions=tuple(sections), history=bundle.history, message=message)

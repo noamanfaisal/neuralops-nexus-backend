@@ -94,6 +94,11 @@ class EventMapper:
         self._tool_capability_ids = tool_capability_ids if tool_capability_ids is not None else {}
         self._buffer = ""
         self._received: list[str] = []
+        # A NEW text part after earlier text (the model talked, called tools,
+        # talked again) gets a line break between the parts — glued parts put
+        # an <<<OUTPUT:...>>> opener mid-line, where the marker parser rightly
+        # refuses it (docs/MISSING.md, found live 2026-10-27).
+        self._pending_break = False
         self._last_sent = time.monotonic()
         self._tool_started: dict[str, tuple[str, dict, float]] = {}  # call_id → (name, args, t0)
         # tools that actually EXECUTED (ok tool_call_end) — goes out on
@@ -171,10 +176,16 @@ class EventMapper:
         text = ""
         if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
             text = event.part.content
+            if self._received:  # a SECOND text part of this run begins
+                self._pending_break = True
         elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
             text = event.delta.content_delta
         if not text:
             return []
+        if self._pending_break:
+            self._pending_break = False
+            if not self._received[-1].endswith("\n"):
+                text = "\n" + text
         self._received.append(text)
         self._buffer += text
         due = (time.monotonic() - self._last_sent) * 1000 >= self._batch_ms

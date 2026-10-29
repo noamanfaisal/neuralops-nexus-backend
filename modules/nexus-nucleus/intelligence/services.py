@@ -98,11 +98,21 @@ def update_model_config(company, config_id: str, data: dict):
     if data.get("model_id") is not None:
         _reject_prefixed_model_id(data["model_id"])
 
+    # Save-lock (owner's ruling 2026-10-28): changing how the model is REACHED
+    # voids the last passed check -- those values were never verified. Ordinary
+    # edits (name, notes, generation settings) keep the stamp.
+    reach_changed = any(
+        data.get(field) is not None and data[field] != getattr(config, field)
+        for field in ("provider", "model_id", "api_base")
+    ) or bool(api_key and api_key != config.get_api_key())
+
     for field, value in data.items():
         if value is not None:
             setattr(config, field, value)
     if api_key:
         config.set_api_key(api_key)
+    if reach_changed:
+        config.last_check_ok_at = None
     config.save()
     return config
 
@@ -155,6 +165,7 @@ def check_model_config(company, data: dict) -> dict:
         raise WorkerUnavailable(502, "The AI worker could not be reached to check the model. Try again in a moment.")
 
     if answer.get("ok"):
+        _stamp_check_pass(company, data, api_key)
         return {"ok": True, "reason": None, "latency_ms": answer.get("latency_ms")}
     code = answer.get("error_code")
     if code == "unsupported_provider":
@@ -168,6 +179,32 @@ def check_model_config(company, data: dict) -> dict:
             reason = "The model provider did not accept this model with this key%s." % (" (HTTP %s)" % status if status else "")
     logger.info("[model_check] %s:%s refused: %s (status %s)", provider, model_id, code, answer.get("status_code"))
     return {"ok": False, "reason": reason, "latency_ms": None}
+
+
+def _stamp_check_pass(company, data: dict, effective_api_key) -> None:
+    """
+    Save-lock (owner's ruling 2026-10-28): remember on the row that it passed
+    a check. Stamped ONLY when the values just checked are exactly the stored
+    ones -- a pre-save check of edited values proves nothing about what is in
+    the database, so it never stamps. `effective_api_key` is the key the check
+    actually used (the payload's, or the stored one it fell back to).
+    """
+    from django.utils import timezone
+
+    if not data.get("config_id"):
+        return
+    config = get_model_config(company, data["config_id"])
+    if not config:
+        return
+    same_reach = (
+        data.get("provider") == config.provider
+        and (data.get("model_id") or "").strip() == config.model_id
+        and (data.get("api_base") or None) == (config.api_base or None)
+        and (effective_api_key or None) == (config.get_api_key() or None)
+    )
+    if same_reach:
+        config.last_check_ok_at = timezone.now()
+        config.save(update_fields=["last_check_ok_at", "updated_at"])
 
 
 def attach_model_config_to_project(company, config_id: str, project_id: str) -> bool:

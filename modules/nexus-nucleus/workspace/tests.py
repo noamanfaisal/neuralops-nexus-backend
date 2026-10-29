@@ -961,3 +961,41 @@ class SpendLimitTests(InviteGrantsFixture):
         self.p1.refresh_from_db()
         self.assertIsNone(self.p1.spend_limit_monthly)
         self.assertEqual(spend_limit_reached(self.p1), (False, Decimal("0")))
+
+
+# ── Unarchive a topic (tester finding 2026-10-28: archiving was one-way) ─────
+
+from chat.tests import MentionRightFixture  # noqa: E402
+
+
+class TopicUnarchiveTests(MentionRightFixture):
+    def _base(self):
+        return f"/api/v1/projects/{self.p1.id}/channels/{self.c1.id}/topics/"
+
+    def test_an_archived_topic_can_be_brought_back(self):
+        self.t1.soft_delete()
+        # Gone from the default list; the archived listing shows and FLAGS it.
+        plain = self.call("get", self._base(), self.owner).json()
+        self.assertNotIn(str(self.t1.id), [t["id"] for t in plain])
+        rows = self.call("get", f"{self._base()}?include_archived=true", self.owner).json()
+        row = next(t for t in rows if t["id"] == str(self.t1.id))
+        self.assertTrue(row["archived"])
+        self.assertTrue(all(t["archived"] is False for t in rows if t["id"] != str(self.t1.id)))
+        # A Viewer may not restore it.
+        r = self.call("post", f"{self._base()}{self.t1.id}/unarchive/", self.vera)
+        self.assertEqual(r.status_code, 403, r.content)
+        # The owner may; the topic is active again and listed normally.
+        r = self.call("post", f"{self._base()}{self.t1.id}/unarchive/", self.owner)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.t1.refresh_from_db()
+        self.assertTrue(self.t1.is_active)
+        plain = self.call("get", self._base(), self.owner).json()
+        row = next(t for t in plain if t["id"] == str(self.t1.id))
+        self.assertFalse(row["archived"])
+        # Restoring twice is a no-op, not an error.
+        self.assertEqual(self.call("post", f"{self._base()}{self.t1.id}/unarchive/", self.owner).status_code, 200)
+
+    def test_unknown_topic_is_a_404(self):
+        import uuid
+        r = self.call("post", f"{self._base()}{uuid.uuid4()}/unarchive/", self.owner)
+        self.assertEqual(r.status_code, 404)

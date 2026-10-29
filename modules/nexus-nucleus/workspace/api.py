@@ -346,6 +346,9 @@ def list_topics(request, project_id: str, channel_id: str, include_archived: boo
             "channel_id": str(t.channel_id), "project_id": str(t.project_id),
             "has_unread": unread_map.get(str(t.id), 0) > 0,
             "unread_count": unread_map.get(str(t.id), 0),
+            # Only meaningful with include_archived=true — the restore list
+            # needs to tell the two apart (tester finding 2026-10-28).
+            "archived": not t.is_active,
         }
         for t in topics
     ]
@@ -397,6 +400,24 @@ def archive_topic(request, project_id: str, channel_id: str, topic_id: str):
         raise HttpError(403, "You don't have permission to archive this topic.")
     svc.archive_topic(topic)
     return {"ok": True, "message": f"Topic '{topic.title}' archived."}
+
+
+@router.post("/{project_id}/channels/{channel_id}/topics/{topic_id}/unarchive/", response={200: dict})
+def unarchive_topic(request, project_id: str, channel_id: str, topic_id: str):
+    """Bring an archived chat back (tester finding 2026-10-28: archiving was a
+    one-way door). Same right as archiving; safe to call twice."""
+    company, user, project = _resolve_project(request, project_id)
+    channel = svc.get_channel(company, project, channel_id)
+    if not channel:
+        raise HttpError(404, "Channel not found.")
+    # get_topic filters to ACTIVE rows — the whole point here is the archived one.
+    topic = svc.get_topic_any(company, project, channel, topic_id)
+    if not topic:
+        raise HttpError(404, "Topic not found.")
+    if not PermissionChecker.can(user, "topic.archive", obj=topic):
+        raise HttpError(403, "You don't have permission to restore this topic.")
+    svc.unarchive_topic(topic)
+    return {"ok": True, "message": f"Topic '{topic.title}' is back."}
 
 
 @router.post("/{project_id}/channels/{channel_id}/topics/{topic_id}/read/", response={200: dict}, tags=["Chat"])

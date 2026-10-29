@@ -197,8 +197,22 @@ def _accepted_kwargs(builder, config: dict) -> dict:
 
 def _bearer_token(server: dict) -> str | None:
     """Same rule as 0.8.0 (legacy nucleus_client): oauth2 servers send the USER
-    access token under token_env_var; static servers send client_secret."""
+    access token under token_env_var; static servers send client_secret.
+
+    The pinned framework (2.55) copies this value VERBATIM into the
+    Authorization header (capabilities/mcp.py _build_local) — found live
+    2026-10-27, docs/MISSING.md — so the scheme is added HERE: the stored
+    token becomes "Bearer <token>" unless the person already saved it with a
+    bearer prefix (any letter case — kept verbatim, no double prefix).
+    Empty or missing stays None (no Authorization header at all)."""
     secrets = server.get("secrets") or {}
     if server.get("auth_type") == "oauth2":
-        return secrets.get(server.get("token_env_var") or "OAUTH_ACCESS_TOKEN")
-    return secrets.get("client_secret")
+        raw = secrets.get(server.get("token_env_var") or "OAUTH_ACCESS_TOKEN")
+    else:
+        raw = secrets.get("client_secret")
+    token = (raw or "").strip()
+    if not token:
+        return None
+    if token.lower().startswith("bearer "):
+        return token
+    return f"Bearer {token}"
