@@ -42,11 +42,16 @@ if not SECRET_KEY:
             "POSTGRES_PASSWORD and the other live secrets), then start again. "
             "Set DEBUG=true only for development."
         )
-# The public hook endpoint (scheduling/hooks_api.py) accepts a body from anyone
-# who has a token, and Django parses it before our code runs. 64 KB is well over
-# the 4 KB of text + 32 KB of data a fire may carry, and far under the 2.5 MB
-# default an unauthenticated caller could otherwise make this process parse.
-DATA_UPLOAD_MAX_MEMORY_SIZE = 64 * 1024
+# The body-size wall is PER ROUTE, not global (the 64 KB pause bug,
+# docs/MISSING.md 2026-10-27): a global 64 * 1024 here also capped every
+# internal engine→nucleus POST, and an approval pause carries the whole run
+# so far (history + tool results) — the save answered RequestDataTooBig → 500
+# → the card on screen answered "Nothing is waiting on this message". So the
+# global cap is 16 MB (the internal routes sit behind the internal key and
+# nginx blocks them from outside), and the ONE public write path — the hook
+# endpoint — enforces its own 64 KB itself, from the Content-Length header,
+# before the body is read (scheduling/hooks_api.py HOOK_MAX_BODY_BYTES).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
 # Self-hosted servers are reached by LAN addresses, Tailscale names and
 # tunnels nobody can predict, and auth is bearer-token (the Host header never
 # mints links or cookies here) — so the default stays open, and a deployment

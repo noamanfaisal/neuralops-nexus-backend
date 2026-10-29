@@ -669,6 +669,31 @@ class HookFireTests(HookFixture):
         hook.refresh_from_db()
         self.assertEqual((hook.last_status, hook.last_error), (InboundHook.FireStatus.FAILED, "Sara will not answer this."))
 
+    def test_an_oversize_body_is_refused_at_the_door(self):
+        """The global Django cap moved to 16 MB for the internal pause route
+        (docs/MISSING.md 2026-10-27), so this PUBLIC endpoint now holds its own
+        64 KB wall — judged before the body is parsed and before the token is
+        even looked up: nothing recorded, no budget spent, no persona called."""
+        hook, token = self.hook_with_token()
+        big = {"text": "ok", "data": {"pad": "x" * (70 * 1024)}}
+        r, trigger, _ = self.fire(token, big)
+        self.assertEqual(r.status_code, 413, r.content)
+        self.assertIn("64 KB", r.json()["detail"])
+        trigger.assert_not_awaited()
+        hook.refresh_from_db()
+        self.assertEqual(hook.fire_count, 0)
+        self.assertIsNone(hook.last_fired_at)
+        # And a fire within the wall still works right after.
+        self.assertEqual(self.fire(token)[0].status_code, 200)
+
+    def test_a_body_that_is_not_json_is_a_422_not_a_crash(self):
+        """The view parses its own body now (the size wall stands in front of
+        the parse), so the router's old 422 contract is kept by hand."""
+        _, token = self.hook_with_token()
+        r, trigger, _ = self.fire(token, "{this is not json")
+        self.assertEqual(r.status_code, 422, r.content)
+        trigger.assert_not_awaited()
+
     def test_a_hook_is_rate_limited_per_hook_and_says_when_to_retry(self):
         _, token = self.hook_with_token()
         # Freeze the clock: the budget is counted per minute WINDOW (now // 60s),

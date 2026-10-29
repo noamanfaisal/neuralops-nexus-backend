@@ -15,6 +15,13 @@ WORKER_ENDED_EARLY_REASON = "The AI worker stopped replying before it finished. 
 
 # Order matters: the first pattern that matches wins.
 _CATEGORIES: list[tuple[re.Pattern[str], str]] = [
+    # OUR pause-save failure, worded by the engine (ai_system.PauseSaveFailed).
+    # It must come before every provider rule — this one is never the
+    # provider's fault, and it used to land on the 5xx sentence below
+    # (docs/MISSING.md, found live 2026-10-27).
+    (re.compile(r"hold this step for approval|pause (state|save)|could not be saved on the server", re.I),
+     "Couldn't hold this step for approval — the run's state could not be saved. "
+     "Nothing was approved or run; mention the persona again to retry."),
     (re.compile(r"invalid_api_key|incorrect api key|authentication_error|\b401\b|unauthori[sz]ed", re.I),
      "The model provider rejected this model's API key. Check the key on the AI models page."),
     (re.compile(r"insufficient_quota|\b402\b|billing|no remaining|exceeded your current quota", re.I),

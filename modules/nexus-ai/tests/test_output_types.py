@@ -44,6 +44,110 @@ def test_ot1_markers_parse_and_tolerate_mangling():
     assert kind == "text" and clean == "just words, no markers"
 
 
+def test_ot10_a_glued_opener_after_a_sentence_still_counts():
+    """Found live 2026-10-27 (docs/MISSING.md): the model wrote a sentence,
+    called a tool, then opened the marker — and the pieces arrived joined with
+    no line break, so the opener sat mid-line and the whole reply rendered as
+    raw text (the markdown renderer even autolinked `<OUTPUT:chart>`). An
+    opener straight after sentence punctuation now counts for EVERY type; a
+    marker merely mentioned mid-sentence stays prose."""
+    glued = f"I'll pull the revenue report by month.<<<OUTPUT:chart>>>\n{CHART}\n<<<END_OUTPUT>>>"
+    clean, kind, _ = parse_output_markers(glued)
+    assert kind == "chart" and clean == CHART
+    # the live 20:49 case: a two-bracket table opener after the sentence
+    page = "<!DOCTYPE html>\n<html><body>dash</body></html>"
+    glued_table = f"I need to run the daily dashboard data pulls fresh in this reply.<<OUTPUT:table>>\n{page}\n<<END_OUTPUT>>"
+    clean, kind, _ = parse_output_markers(glued_table)
+    assert kind == "table" and clean == page
+    # and end-to-end through finalise_reply: the glued chart renders as a chart
+    clean, kind, render, _ = finalise_reply(glued, "chart")
+    assert (kind, render) == ("chart", "chart") and json.loads(clean)["type"] == "bar"
+    # a mention mid-sentence (no sentence punctuation before it) stays text
+    mention = "The <<<OUTPUT:chart>>> marker names the reply's type."
+    clean, kind, _ = parse_output_markers(mention)
+    assert kind == "text" and clean == mention
+    # a colon lead-in with no real payload claims the type but doesn't hold —
+    # decision 2's validation still lands it on text
+    _, kind, render, _ = finalise_reply("Markers look like this: <<<OUTPUT:chart>>>", "chart")
+    assert (kind, render) == ("text", "text")
+
+
+def test_ot11_text_parts_around_tool_calls_get_a_line_break():
+    """The other half of the glue (same finding): the event mapper now joins a
+    run's SECOND text part to the first with a line break, so an opener that
+    starts a fresh part lands at a line start even without punctuation."""
+    from types import SimpleNamespace as NS
+
+    from pydantic_ai.messages import PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta
+
+    from ai_engine.pydantic_ai_system.event_mapper import EventMapper
+
+    mapper = EventMapper(msg_id="m1", persona=NS(id="p1", name="T"))
+    mapper.map(PartStartEvent(index=0, part=TextPart(content="Pulling the data now")))
+    mapper.map(PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" — one moment")))
+    # (tool call happens here; a NEW text part opens the marker)
+    mapper.map(PartStartEvent(index=1, part=TextPart(content="<<<OUTPUT:chart>>>")))
+    mapper.map(PartDeltaEvent(index=1, delta=TextPartDelta(content_delta="\n" + CHART)))
+    assert mapper.text() == f"Pulling the data now — one moment\n<<<OUTPUT:chart>>>\n{CHART}"
+    clean, kind, _ = parse_output_markers(mapper.text())
+    assert kind == "chart" and clean == CHART
+    # a first part that already ends with a newline gets no second one
+    mapper2 = EventMapper(msg_id="m2", persona=NS(id="p1", name="T"))
+    mapper2.map(PartStartEvent(index=0, part=TextPart(content="Done.\n")))
+    mapper2.map(PartStartEvent(index=1, part=TextPart(content="Next part")))
+    assert mapper2.text() == "Done.\nNext part"
+
+
+async def test_ot12_persona_default_answer_format_is_respected():
+    """Found live 2026-10-27 (docs/MISSING.md): @Analyst set to Text answered
+    "compare … per currency" with a chart — the persona's setting was never
+    consulted. Order now: directive in the message → persona default (not
+    auto) → classifier → text."""
+    from unittest.mock import AsyncMock, patch
+
+    from ai_engine.output_types import classifier
+    from ai_engine.output_types.resolver import resolve_output_spec
+
+    # The default decides — and the classifier is NOT consulted at all.
+    with patch.object(classifier, "classify_output_type", new_callable=AsyncMock) as classify:
+        name, spec = await resolve_output_spec(
+            None, "how did revenue compare with September, per currency?", (),
+            persona_default="text")
+        assert name == "text" and spec is not None
+        classify.assert_not_awaited()
+
+    # A directive in the message still wins over the default.
+    name, _ = await resolve_output_spec(
+        "chart", "compare revenue", (), persona_default="text")
+    assert name == "chart"
+
+    # "auto" (and case/space noise) hands the choice to the classifier.
+    with patch.object(classifier, "classify_output_type",
+                      new_callable=AsyncMock, return_value="chart") as classify:
+        name, _ = await resolve_output_spec(None, "compare revenue", (),
+                                            persona_default=" Auto ")
+        assert name == "chart"
+        classify.assert_awaited_once()
+
+    # An unknown default never breaks the turn — the classifier takes over.
+    with patch.object(classifier, "classify_output_type",
+                      new_callable=AsyncMock, return_value="text"):
+        name, _ = await resolve_output_spec(None, "hello", (),
+                                            persona_default="hologram")
+        assert name == "text"
+
+
+async def test_ot13_persona_default_rides_the_whole_trigger(harness):
+    """E2E: the fake persona's prompt carries output_type='text', so a turn
+    with NO directive resolves to text without ever touching the classifier
+    (which would need an embedder this harness doesn't run)."""
+    harness.provider.script.text = "Plain words, no chart."
+    events = await harness.trigger(harness.job(output_type="auto"))
+    [done] = _by_type(events, "message_done")
+    assert done["output_type"] == "text" and done["render_as"] == "text"
+    assert done["content"] == "Plain words, no chart."
+
+
 def test_ot2_unmarked_chart_recovered_only_when_asked():
     """Item 23 — recovery files an unmarked chart ONLY on a chart turn.
     The whole-object JSON shaped as a chart: on resolved_type='chart' it is the

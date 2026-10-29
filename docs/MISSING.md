@@ -42,8 +42,9 @@ hardening entry (parts 2/5 — no pane, no writer needed); parts 1 and 3
 output) still stand. Remaining Stage 2: the owner's comments file keyed by
 TC id, if any comments come.
 
-**Stage 3 — release chores.** Rotate the exposed OpenAI/Anthropic keys
-(if not already done for the fresh start); Supabase cleanups (legacy
+**Stage 3 — release chores.** ~~Rotate the exposed OpenAI/Anthropic keys~~
+(DONE 2026-10-28, owner terminated the old keys); Supabase cleanups (owner
+does these LAST, right before release) (legacy
 device-verify function, test-install-1 phone_home_events row); regenerate
 engine requirements.lock at next image build (7c); `seed_catalog
 --regenerate` + commit as the release's catalog snapshot.
@@ -99,8 +100,7 @@ easy-install-and-free-trial-plan.
   a separate PRIVATE repo** (`neuralops-demo`); the installer stays bash.
   **Built by the owner's developer** from docs/EASY-INSTALL-TASKS.md (tasks
   1.1–1.5, 2.1–2.8, each with exact behaviour + proof); design in
-  docs/EASY-INSTALL.md. Open: demo length, demo content, max demos at once,
-  how the link is sent, first cloud.
+  docs/EASY-INSTALL.md.
 - **RULINGS 2026-10-28:** (1) demo DNS = **Hostinger's DNS API**; the domain
   stays at Hostinger; demo addresses are `<id>.demo.neuralopsnexus.ai`
   (EASY-INSTALL-TASKS task 2.3, with safety rules: overwrite always false,
@@ -113,40 +113,17 @@ easy-install-and-free-trial-plan.
   the private repo (DEMO-SERVICE.md + DEMO-DNS-HOSTINGER.md), not here.
   Notes: always-free tiers are ~1 GB (too small); OCI's free ARM servers
   need ARM images first; RunPod pods can't run Docker.
-- **Sign-up emails (2026-10-28):** Supabase's built-in mailer only sends to
-  team members, ~2/hour, on every plan. Resend domain neuralopsnexus.ai
-  VERIFIED 2026-10-28 (DKIM added at Hostinger). Remaining: Resend API key
-  -> Supabase custom SMTP (smtp.resend.com:587, user `resend`, sender
-  no-reply@neuralopsnexus.ai) -> raise the email rate limit -> test a
-  sign-up from a non-team address.
+- **Sign-up emails — DONE 2026-10-28 (owner):** Supabase's built-in mailer
+  only sends to team members, ~2/hour, on every plan, so Supabase now uses
+  custom SMTP through Resend (domain neuralopsnexus.ai verified, DKIM at
+  Hostinger; smtp.resend.com:587, sender no-reply@neuralopsnexus.ai).
+  Confirmation emails now reach any address.
 
-**EASY INSTALL — OPEN WORK (checklist; full behaviour + proof per task in
-docs/EASY-INSTALL-TASKS.md; built by the owner's developer):**
-- STEP 1, one-command installer (public repo):
-  - [ ] 1.1 Replace the Cloudflare quick tunnel with **Tailscale Funnel**
-    (`install.sh` question + Tailscale setup, `neuralops` command learns
-    Tailscale, remove `cloudflared` from compose and both scripts)
-  - [ ] 1.2 Resume a half-finished install (`.installed` marker, resume mode,
-    v1 machines get the marker on `neuralops update`)
-  - [ ] 1.3 `get.neuralopsnexus.ai` → install.sh on mapax-io `main` (Vercel
-    redirect + DNS; needs the 1.0.0 merge first)
-  - [ ] 1.4 User docs (readme "Self-hosting" section, EASY-INSTALL.md status)
-  - [ ] 1.5 Owner proof runs P1–P7 (fresh VM Tailscale, VPS with domain,
-    re-run, reboot, backup/update, uninstall/start, Ctrl+C resume)
-- STEP 2, automatic demo servers:
-  - [ ] 2.1 `create_owner --email` reservation (public repo, nucleus; can
-    start now, no cloud needed)
-  - [ ] Demo service (PRIVATE repo `neuralops-demo`, spec DEMO-SERVICE.md):
-    FastAPI request → bot check → email confirmation → rate limits →
-    background job; provider list with credit counting + switching +
-    waitlist; clouds AWS/Google/Azure first (OCI after ARM images; RunPod
-    only with a full VM); DNS via Hostinger (DEMO-DNS-HOSTINGER.md);
-    first-boot install + owner reservation; three-layer auto-delete;
-    Resend emails; "Request a demo" on the website; admin endpoints; tests
-    with fakes; owner proof (DEMO-SERVICE.md §11)
-  - [ ] Owner: cloud credits + demo-only accounts with budget alerts
-  - [ ] Owner decisions: demo length · demo content · limit values ·
-    provider order · where the demo service runs
+**EASY INSTALL + DEMO SERVICE — HANDED TO THE DEVELOPER (owner,
+2026-10-28):** the developer owns the whole track, including the open
+decisions, and is finishing it for a merge. Not tracked in this file any
+more; his reference specs are docs/EASY-INSTALL-TASKS.md and (private repo)
+DEMO-SERVICE.md + DEMO-DNS-HOSTINGER.md.
 
 **FILE VIEWER — OPEN WORK (spec: docs/FILE-VIEWER-PANE.md; the nucleus
 browse/download/view endpoints are BUILT and tested, see §3):**
@@ -223,9 +200,8 @@ browse/download/view endpoints are BUILT and tested, see §3):**
   one reply → no 500, Allow resumes the run. WORKAROUND until then: analytics
   tools on Auto (no pause, no problem) — recommended anyway, they are
   read-only.
-- The aaf-analytics `neuralops` token was shown in a chat on 2026-10-27 —
-  rotate it (analytics `.env` MCP_TOKENS + the NeuralOps secret + restart the
-  analytics stack).
+- ~~The aaf-analytics `neuralops` token was shown in a chat on 2026-10-27 —
+  rotate it~~ **DONE 2026-10-28 (owner terminated the old tokens).**
 - **CHECK — prompt caching on Claude models.** The Usage page (project mktv,
   2026-10-27) showed claude-sonnet-5-5 with 660K input tokens and **0
   cached** (DeepSeek: 48% cached), so every Claude call paid full price for
@@ -283,9 +259,7 @@ owner verifying daily):**
    connects + file viewer pane (security ruling first).
    UPDATE 2026-10-28: file viewer parts 1–3 (pane, download tickets,
    upload) don't need the ruling and can ship earlier; only part 4 (live
-   preview) waits for it. Easy install (Step 1) and `create_owner --email`
-   run ALONGSIDE this queue — they sit at the top of Stage 4 (see the EASY
-   INSTALL checklist above).
+   preview) waits for it.
 
 Still parked (unchanged): local login UI, gateway mint-for-others,
 delegation/tool_access/approval_scope toggles, portal guess-brake,
@@ -550,7 +524,8 @@ lesson 14) and rebuild the image — fold into the next image build.
 - If the nexus-ai-new container is ever RECREATED before the image rebuild
   (7c): re-run `docker exec neuralops-nexus-ai-new
   /opt/venv/nexus-ai-env/bin/pip install "pydantic-ai-slim[web-fetch]"`.
-- Rotate the OpenAI/Anthropic keys that appeared in earlier terminal pastes.
+- ~~Rotate the OpenAI/Anthropic keys that appeared in earlier terminal pastes.~~
+  DONE 2026-10-28.
 - Git commits in BOTH repos — **DONE 2026-10-21 17:11**: backend 581d21b
   (step8-switchover), frontend 79bcef4 (noamanfaisal) — the whole revamp
   through the spend limit, suites 469/116/1140 all green at commit time.
@@ -779,9 +754,17 @@ lesson 14) and rebuild the image — fold into the next image build.
 
 - MCP connector toggles ship WITH the bundled connectors (scope ruling: no
   dead switches) — MCP track.
-- Edit dialog: gate Save behind a passed check the way Register now is?
-  (Today: Edit checks on save when the reach changed; the explicit Check
-  button exists. Owner to rule if Save should also lock.)
+- **Model Edit dialog — RULED (owner, 2026-10-28): lock Save until the
+  model has passed a check.** A model that has never passed a check opens
+  with Save locked; the person clicks **Check**, and on a pass Save unlocks.
+  Once a model has passed, Save stays enabled for ordinary edits (name,
+  notes, generation settings). If the person changes how it is reached
+  (provider, API base, model id, key), Save locks again until a fresh check
+  passes. Build: frontend (models-tab edit dialog, like Register) + a
+  `last_checked_ok_at` (or similar) on ModelConfig so "has passed before"
+  survives a reload (nucleus field + migration, set by the check endpoint).
+  Tests: never-checked → Save locked; check passes → unlocked; checked model
+  + rename → Save enabled; checked model + new key → locked until re-check.
 - gpt-5.x pricing rows in the price catalog — watch the Usage page's
   unpriced_rows (≥) on new models; the catalog refresh task may lag new ids.
 

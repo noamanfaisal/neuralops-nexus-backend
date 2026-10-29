@@ -40,6 +40,75 @@ class TopicHistoryInternalTests(MentionRightFixture):
         self.assertEqual(r.status_code, 401)
 
 
+class InternalBodySizeTests(MentionRightFixture):
+    """The 64 KB pause bug (docs/MISSING.md, found live 2026-10-27): the global
+    DATA_UPLOAD_MAX_MEMORY_SIZE capped every engine→nucleus POST, and a pause
+    carries the whole run so far — RequestDataTooBig → 500 → the approval card
+    answered "Nothing is waiting on this message". The cap is per-route now
+    (16 MB global; the public hook enforces its own 64 KB), so a big pause and
+    a big usage batch must simply save."""
+
+    def _reply(self):
+        return ChatMessage.objects.create(
+            company=self.company, project=self.p1, topic=self.t1,
+            sender=self.persona_sara.identity_user, content="working…",
+            sequence=ChatMessage.objects.filter(topic=self.t1).count() + 1,
+            metadata={"persona_id": str(self.persona_sara.id), "persona_name": "Sara"},
+        )
+
+    def test_a_1mb_pause_state_is_saved_intact(self):
+        import json
+
+        from nucleus.models import PausedRun
+
+        reply = self._reply()
+        state = "x" * (1024 * 1024)  # far over the old 64 KB wall
+        body = {
+            "job_id": "job-1", "topic_id": str(self.t1.id),
+            "persona_id": str(self.persona_sara.id), "state": state,
+            "catalog_hash": "h1", "role": "STANDARD",
+            "pending": [{"call_id": "c1", "tool": "aaf_analytics__run_sql",
+                         "capability_id": "prefixed-s1", "args_preview": "SELECT 1",
+                         "kind": "approval"}],
+        }
+        with patch.dict(os.environ, {"INTERNAL_API_KEY": "k"}):
+            r = Client().post(
+                f"/api/v1/internal/messages/{reply.id}/pause/",
+                data=json.dumps(body), content_type="application/json",
+                HTTP_X_INTERNAL_API_KEY="k",
+            )
+        self.assertEqual(r.status_code, 201, r.content[:300])
+        self.assertEqual(r.json(), {"ok": True, "pending": 1})
+        row = PausedRun.objects.get(message_id=reply.id)
+        self.assertEqual(len(row.state), len(state))      # stored intact, not truncated
+        self.assertEqual(row.state[:4], "xxxx")
+        self.assertEqual(row.pending[0]["call_id"], "c1")
+
+    def test_a_200kb_usage_batch_is_accepted(self):
+        import json
+
+        from django.utils import timezone
+
+        from nucleus.models import UsageRecord
+
+        called_at = timezone.now().isoformat()
+        records = [
+            {"message_id": f"m-{i}", "job_id": f"j-{i}", "kind": "chat_reply",
+             "provider": "openai", "model_id": "gpt-test", "role": "STANDARD",
+             "input_tokens": 1000, "output_tokens": 50, "called_at": called_at,
+             "source": "s" * 400}
+            for i in range(300)
+        ]
+        body = json.dumps({"records": records})
+        self.assertGreater(len(body), 200 * 1024)  # the point of the test
+        with patch.dict(os.environ, {"INTERNAL_API_KEY": "k"}):
+            r = Client().post("/api/v1/internal/usage/", data=body,
+                              content_type="application/json", HTTP_X_INTERNAL_API_KEY="k")
+        self.assertEqual(r.status_code, 201, r.content[:300])
+        self.assertEqual(r.json()["saved"], 300)
+        self.assertEqual(UsageRecord.objects.count(), 300)
+
+
 class PersonaInternalBriefTests(MentionRightFixture):
     def payload(self):
         from nucleus.models import Prompt

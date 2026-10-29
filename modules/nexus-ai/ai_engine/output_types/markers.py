@@ -35,6 +35,14 @@ _OUTPUT_RE = re.compile(
     re.DOTALL | re.MULTILINE,
 )
 
+# An opener glued straight onto the END of a sentence ("…the pulls.<<<OUTPUT:
+# chart>>>") is still an opener — seen live 2026-10-27, when the text before a
+# tool call and the marker after it arrived joined with no line break. A line
+# break is inserted so the ^ anchor above matches. A marker merely MENTIONED
+# mid-sentence (preceded by a word or space, not sentence punctuation) is
+# left alone and stays prose.
+_GLUED_OPENER = re.compile(r"(?<=[.!?:])[ \t]*(?=<{2,3}OUTPUT:\w)")
+
 _EMBED_RE = re.compile(r"<<<EMBED>>>\s*(.*?)\s*<<<END_EMBED>>>", re.DOTALL)
 
 _MCP_HTML_RE = re.compile(r"<<<HTML>>>\s*(.*?)\s*<<<END>>>", re.DOTALL)
@@ -51,7 +59,7 @@ def parse_output_markers(raw: str) -> tuple[str, str, str | None]:
     Priority: MCP markers override AI-generated markers; <<<CONTEXT>>> is
     always used as embed_description when present; no markers at all = "text".
     """
-    text = raw
+    text = _GLUED_OPENER.sub("\n", raw)
 
     embed_description: str | None = None
     context_m = _MCP_CONTEXT_RE.search(text)

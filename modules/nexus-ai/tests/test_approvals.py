@@ -91,6 +91,27 @@ def _write_step(call_id: str = "call_w1") -> dict:
             "args": {"path": "out.txt", "content": "hello-approved"}}
 
 
+async def test_a_failed_pause_save_ends_the_reply_with_a_worded_error(harness, tmp_path):
+    """The 64 KB pause bug's second half (docs/MISSING.md 2026-10-27): when the
+    pause state cannot be saved, the reply must end with ONE worded
+    message_error — never message_paused (a card nobody can answer) and never
+    the raw transport text ("500 Internal Server Error"), which nucleus's
+    reason mapper read as a model-provider failure. Usage is still recorded."""
+    harness.nucleus.persona = _fs_persona(harness, tmp_path)
+    harness.nucleus.pause_status = 500
+    harness.provider.script.steps = [_write_step()]
+    events = await harness.trigger()
+
+    types = [e["type"] for e in events]
+    assert types[-1] == "message_error"
+    assert "message_paused" not in types and "message_done" not in types
+    [err] = [e for e in events if e["type"] == "message_error"]
+    assert "hold this step for approval" in err["error"]
+    assert "500" not in err["error"]            # the raw transport text never rides out
+    assert "Internal Server Error" not in err["error"]
+    assert harness.nucleus.usage_posts          # the run's usage still landed
+
+
 async def test_a1_write_tool_pauses_the_run(harness, tmp_path):
     """Item 2 — a write tool PAUSES the run for approval instead of running.
     The model calls write_file → the stream carries approval_requested (call id,

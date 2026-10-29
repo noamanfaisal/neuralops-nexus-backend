@@ -74,6 +74,7 @@ class FakeNucleus:
         self.history: list[dict] = []
         self.usage_posts: list[dict] = []     # every POST body to the usage endpoint
         self.usage_status: int = 201          # set 500 for T15
+        self.pause_status: int = 201          # set 500 for the pause-save failure test
         self.history_params: list[dict] = []
         self.pause_posts: list[dict] = []     # item 2: every pause POST (msg_id added)
         self.nudges: dict[str, list[str]] = {}  # W8: msg_id → waiting texts (taken once)
@@ -84,6 +85,7 @@ class FakeNucleus:
         self.history = []
         self.usage_posts.clear()
         self.usage_status = 201
+        self.pause_status = 201
         self.history_params.clear()
         self.pause_posts.clear()
         self.nudges = {}
@@ -116,6 +118,9 @@ class FakeNucleus:
         return JSONResponse({"nudges": self.nudges.pop(msg_id, [])})
 
     async def post_pause(self, request: Request) -> JSONResponse:
+        if self.pause_status != 201:
+            # the real failure shape: RequestDataTooBig surfaced as a bare 500
+            return JSONResponse({"detail": "Internal Server Error"}, status_code=self.pause_status)
         body = await request.json()
         body["msg_id"] = request.path_params["msg_id"]
         self.pause_posts.append(body)
