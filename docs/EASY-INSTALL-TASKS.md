@@ -237,7 +237,7 @@ neuralops-demo/
 │   ├── aws.py          boto3
 │   ├── gcp.py          google-cloud-compute
 │   └── azure.py        azure-identity + azure-mgmt-compute / -network / -resource
-├── dns.py              create/delete demo-xxxx.neuralopsnexus.ai
+├── dns.py              create/delete <id>.demo.neuralopsnexus.ai (Hostinger DNS API)
 ├── ai_keys.py          create/revoke a spending-capped AI key per demo
 ├── cloud-init.yaml.j2  the first-boot file (template)
 ├── tests/              with fake clouds, fake DNS, fake key provider
@@ -245,7 +245,7 @@ neuralops-demo/
 ```
 
 ### Settings (environment variables or a config file outside the repo)
-Cloud credentials use each cloud's standard method (AWS profile, Google application-default credentials, Azure service principal), always for a **demo-only** account/project/subscription. Also: the DNS provider token, the AI key provisioning key, the maximum number of demos at once, the default demo length, the default cloud, and region/size per cloud.
+Cloud credentials use each cloud's standard method (AWS profile, Google application-default credentials, Azure service principal), always for a **demo-only** account/project/subscription. Also: the Hostinger API token (`HOSTINGER_API_TOKEN`), the AI key provisioning key, the maximum number of demos at once, the default demo length, the default cloud, and region/size per cloud.
 
 ### The interface (clouds/base.py)
 Every cloud implements the same four operations:
@@ -259,14 +259,14 @@ Every cloud implements the same four operations:
 ### Commands
 | Command | Behaviour |
 |---|---|
-| `create --cloud aws\|gcp\|azure --email E [--hours N]` | The flow below |
+| `create --cloud aws\|gcp\|azure --email E [--hours N] [--name NAME]` | The flow below |
 | `list` | Every running demo on every configured cloud: id, cloud, email, address, time left |
 | `extend <id> --hours N` | Moves the end time (updates the tag, and the cloud's own timer where possible) |
 | `delete <id>` | Deletes server + DNS record + AI key. Safe if any part is already gone |
 | `reap` | Deletes every demo past its end time on every cloud. Run by a timer (task 2.6) |
 
 ### The `create` flow
-1. Make an id: `d-` + 4 random lowercase letters/digits (e.g. `d-x7k2`). Address: `demo-x7k2.neuralopsnexus.ai`. End time: now + N hours (UTC).
+1. Make an id: 6 random lowercase letters/digits (e.g. `k7m2qp`), or the `--name` given (task 2.3 rules). Address: `k7m2qp.demo.neuralopsnexus.ai`. End time: now + N hours (UTC).
 2. Refuse if the number of running demos has reached the maximum.
 3. Create the demo AI key (task 2.4) with its spending limit (if demos come with a model; decision open).
 4. Render `cloud-init.yaml.j2` (task 2.5) with: the address, the requester's email, the AI key, and the end time in minutes.
@@ -277,8 +277,31 @@ Every cloud implements the same four operations:
 9. **If any step fails before the server is ready:** clean up what was created (AI key, DNS record, server) and say exactly what failed.
 
 ## Task 2.3 — DNS (dns.py)
-- Create/delete an `A` record `demo-<id>.neuralopsnexus.ai → <ip>`, short TTL (60 s).
-- Provider: wherever neuralopsnexus.ai's DNS is managed (**decision open: Vercel DNS or Cloudflare**; both have an API). Write the module against one provider, behind two functions (`add_record`, `remove_record`), so switching later touches only this file.
+**Provider: Hostinger's DNS API (ruled 2026-10-28).** neuralopsnexus.ai stays at Hostinger, nothing moves. The same zone also holds the website, the Titan mailboxes (MX, `titan1._domainkey`) and Resend (`resend._domainkey`, `send`, `rsend`), so the safety rules below are not optional.
+
+**Demo address:** `<id>.demo.neuralopsnexus.ai` → the demo server's IP. In the Hostinger zone the record NAME is `<id>.demo` (a two-part name inside the main zone; no delegation needed). `<id>` = 6 random lowercase letters/digits by default, or `--name mktv` (3–20 chars, `a-z0-9-`, refused if taken).
+
+**API** (base `https://developers.hostinger.com`, header `Authorization: Bearer <token>`, JSON):
+| Action | Call | Body |
+|---|---|---|
+| list | `GET /api/dns/v1/zones/neuralopsnexus.ai` | — |
+| check before writing | `POST /api/dns/v1/zones/neuralopsnexus.ai/validate` | same as add |
+| add | `PUT /api/dns/v1/zones/neuralopsnexus.ai` | `{"overwrite": false, "zone": [{"name": "<id>.demo", "type": "A", "ttl": 60, "records": [{"content": "<ip>"}]}]}` |
+| delete | `DELETE /api/dns/v1/zones/neuralopsnexus.ai` | `{"filters": [{"name": "<id>.demo", "type": "A"}]}` |
+If validate rejects TTL 60, use the smallest TTL it accepts (e.g. 300).
+Rate limit: about 90 requests/minute; on `429` wait for `Retry-After`.
+
+**Safety rules (must have tests):**
+1. `overwrite` is ALWAYS sent explicitly as `false`. The API's default is `true` (replaces every record with the same name and type).
+2. Only names matching `^[a-z0-9-]{3,20}\.demo$` may ever be added or deleted. Anything else raises before any HTTP call.
+3. Before adding: `GET` the zone and refuse if the name already exists. Then `validate`, then `PUT`.
+4. Never call the `/reset` endpoint. Never send a `PUT` with more than one zone entry.
+5. Before the first write of each run, save the full zone (`GET`) to a dated JSON file in the tool's state folder, so a mistake can be put back by hand.
+6. `delete` is safe to run twice (a missing record is not an error).
+7. Token in the tool's settings (env `HOSTINGER_API_TOKEN` or the config file outside the repo), never in code, logs or chat. It is account-wide at Hostinger, so treat it like a password; set an expiry when creating it.
+
+Every demo record is a plain DNS record: Caddy on the demo server gets its own Let's Encrypt certificate (about 50 new certificates per week per domain; if demos ever exceed that, switch to one wildcard certificate for `*.demo.neuralopsnexus.ai`).
+Keep it behind two functions (`add_record`, `remove_record`), so switching provider later touches only this file.
 
 ## Task 2.4 — Demo AI keys (ai_keys.py)
 - Create one key per demo with a **hard spending limit** (e.g. OpenRouter's key provisioning API, which supports a credit limit per key), named after the demo id.
@@ -319,7 +342,7 @@ Size: **the 4 GB memory class, 30 GB disk, Ubuntu 24.04 (x86_64), firewall 80 + 
 1. **Demo length:** 1 hour, or longer for a requested demo.
 2. **Demo content:** an empty workspace plus a ready AI model, or a ready-made team (sample personas and a chain).
 3. **Maximum demos running at once.**
-4. **DNS provider** for neuralopsnexus.ai (Vercel or Cloudflare).
+4. ~~DNS provider~~ — **ruled 2026-10-28: Hostinger DNS API** (see task 2.3).
 5. **Sending the link:** printed for us to email, or sent by the tool.
 6. **First cloud:** whichever approves credits first, or a preference.
 

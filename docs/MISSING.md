@@ -100,7 +100,66 @@ easy-install-and-free-trial-plan.
   **Built by the owner's developer** from docs/EASY-INSTALL-TASKS.md (tasks
   1.1–1.5, 2.1–2.8, each with exact behaviour + proof); design in
   docs/EASY-INSTALL.md. Open: demo length, demo content, max demos at once,
-  DNS provider, how the link is sent, first cloud.
+  how the link is sent, first cloud.
+- **RULINGS 2026-10-28:** (1) demo DNS = **Hostinger's DNS API**; the domain
+  stays at Hostinger; demo addresses are `<id>.demo.neuralopsnexus.ai`
+  (EASY-INSTALL-TASKS task 2.3, with safety rules: overwrite always false,
+  only `*.demo` names, never /reset, zone backup before each write).
+  (2) Step 2 becomes an AUTOMATIC web service: the website's "Request a
+  demo" calls our FastAPI service, which (after email confirmation + bot
+  check + rate limits) creates the server on whichever provider still has
+  free credits, switching provider when one runs out, then DNS, install,
+  `create_owner --email`, emails the link. No human approval. Spec lives in
+  the private repo (DEMO-SERVICE.md + DEMO-DNS-HOSTINGER.md), not here.
+  Notes: always-free tiers are ~1 GB (too small); OCI's free ARM servers
+  need ARM images first; RunPod pods can't run Docker.
+- **Sign-up emails (2026-10-28):** Supabase's built-in mailer only sends to
+  team members, ~2/hour, on every plan. Resend domain neuralopsnexus.ai
+  VERIFIED 2026-10-28 (DKIM added at Hostinger). Remaining: Resend API key
+  -> Supabase custom SMTP (smtp.resend.com:587, user `resend`, sender
+  no-reply@neuralopsnexus.ai) -> raise the email rate limit -> test a
+  sign-up from a non-team address.
+
+**EASY INSTALL — OPEN WORK (checklist; full behaviour + proof per task in
+docs/EASY-INSTALL-TASKS.md; built by the owner's developer):**
+- STEP 1, one-command installer (public repo):
+  - [ ] 1.1 Replace the Cloudflare quick tunnel with **Tailscale Funnel**
+    (`install.sh` question + Tailscale setup, `neuralops` command learns
+    Tailscale, remove `cloudflared` from compose and both scripts)
+  - [ ] 1.2 Resume a half-finished install (`.installed` marker, resume mode,
+    v1 machines get the marker on `neuralops update`)
+  - [ ] 1.3 `get.neuralopsnexus.ai` → install.sh on mapax-io `main` (Vercel
+    redirect + DNS; needs the 1.0.0 merge first)
+  - [ ] 1.4 User docs (readme "Self-hosting" section, EASY-INSTALL.md status)
+  - [ ] 1.5 Owner proof runs P1–P7 (fresh VM Tailscale, VPS with domain,
+    re-run, reboot, backup/update, uninstall/start, Ctrl+C resume)
+- STEP 2, automatic demo servers:
+  - [ ] 2.1 `create_owner --email` reservation (public repo, nucleus; can
+    start now, no cloud needed)
+  - [ ] Demo service (PRIVATE repo `neuralops-demo`, spec DEMO-SERVICE.md):
+    FastAPI request → bot check → email confirmation → rate limits →
+    background job; provider list with credit counting + switching +
+    waitlist; clouds AWS/Google/Azure first (OCI after ARM images; RunPod
+    only with a full VM); DNS via Hostinger (DEMO-DNS-HOSTINGER.md);
+    first-boot install + owner reservation; three-layer auto-delete;
+    Resend emails; "Request a demo" on the website; admin endpoints; tests
+    with fakes; owner proof (DEMO-SERVICE.md §11)
+  - [ ] Owner: cloud credits + demo-only accounts with budget alerts
+  - [ ] Owner decisions: demo length · demo content · limit values ·
+    provider order · where the demo service runs
+
+**FILE VIEWER — OPEN WORK (spec: docs/FILE-VIEWER-PANE.md; the nucleus
+browse/download/view endpoints are BUILT and tested, see §3):**
+- [ ] Part 1 — **Files pane** in the web app: breadcrumb + list, refresh,
+  view (`iframe srcdoc` + `sandbox`, no allow-scripts), download (authorised
+  fetch → blob), worded 400/404/409/413/415. Frontend only.
+- [ ] Part 2 — one-time **download tickets** (60 s, single use) for big
+  files + **file chips** in chat when a persona writes a file.
+- [ ] Part 3 — **upload** (new `project.files_write` right, own size limit,
+  no overwrite without the flag; optional new folder / rename / delete).
+- [ ] Part 4 — **live HTML preview** on a SEPARATE origin (scripts can't
+  reach the app's sign-in). Owner rules first: who may preview, which
+  address, network access.
 
 **FOUND 2026-10-27 (connecting the aaf-analytics MCP to an Analyst persona):**
 - **BUG — MCP tokens are sent WITHOUT "Bearer " (affects EVERY authenticated
@@ -167,6 +226,43 @@ easy-install-and-free-trial-plan.
 - The aaf-analytics `neuralops` token was shown in a chat on 2026-10-27 —
   rotate it (analytics `.env` MCP_TOKENS + the NeuralOps secret + restart the
   analytics stack).
+- **CHECK — prompt caching on Claude models.** The Usage page (project mktv,
+  2026-10-27) showed claude-sonnet-5-5 with 660K input tokens and **0
+  cached** (DeepSeek: 48% cached), so every Claude call paid full price for
+  the whole history. Check whether the engine enables Anthropic prompt
+  caching (cache breakpoints on the system prompt + history); if not, turn
+  it on and confirm cached tokens appear on the Usage page.
+
+**TESTER ROUND 2026-10-28 (owner's tester, TESTER-GUIDE):** passed T15–T20,
+T32–T34, and the walkthrough items photo, about/version, pane rail,
+project/channel, chat + realtime, register + check, bad-key check, attach,
+persona, first reply, stop, session. Findings:
+1. **BUG (T16):** in a long existing topic, "draw a table" came back as a
+   raw preflight plan (JSON summary/steps/risks) shown as code; the same
+   prompt in a NEW topic renders a table. Investigate why the turn took the
+   preflight shape (history imitation? a gate firing?) and why it rendered
+   as text (no markers; `recover_unmarked` only covers chart/choice). Same
+   family as the 2026-10-27 marker/format bugs. Need from tester: persona +
+   topic.
+2. **SECURITY (Change password):** no current-password check, and slow.
+   Require the current password and verify it (Supabase re-auth) before
+   `updateUser`; show a saving state. Test: wrong current password →
+   refused, nothing changed.
+3. **MISSING:** rename a topic; unarchive an archived topic (archived
+   topics cannot be brought back today). CHECKED 2026-10-28: rename is
+   **frontend-only** — the backend already has it (`PATCH
+   /projects/{p}/channels/{c}/topics/{t}/` with `title`, right
+   `topic.update`). Unarchive needs **both**: a new
+   `POST …/topics/{t}/unarchive/` (right `topic.archive`) + UI (list
+   archived topics with `include_archived=true`, a Restore action).
+4. **UX (detach model):** refusing to detach a model a project persona uses
+   is right, but the message must name those personas and say "change their
+   model first".
+5. **DOCS (TESTER-GUIDE "Stop and nudge"):** say that a nudge is a message
+   sent WHILE the persona is still replying, to steer it; consider a hint
+   in the composer while a reply streams.
+6. **OPEN:** the tester's "minor error message issue" in T15–T20 — get the
+   test number, the exact text and a screenshot.
 
 **Stage 4 — post-release build queue (details in "Post-test build queue"
 below). SCHEDULE AGREED 2026-10-23 evening (owner: "i need these things to
@@ -185,6 +281,11 @@ owner verifying daily):**
 4. **Week of Nov 16–20 → 1.4.0:** Setup copilot admin tools (the owner's
    11-tool gateway list) + the secure key card + free-LLM one-click
    connects + file viewer pane (security ruling first).
+   UPDATE 2026-10-28: file viewer parts 1–3 (pane, download tickets,
+   upload) don't need the ruling and can ship earlier; only part 4 (live
+   preview) waits for it. Easy install (Step 1) and `create_owner --email`
+   run ALONGSIDE this queue — they sit at the top of Stage 4 (see the EASY
+   INSTALL checklist above).
 
 Still parked (unchanged): local login UI, gateway mint-for-others,
 delegation/tool_access/approval_scope toggles, portal guess-brake,
@@ -347,6 +448,12 @@ stdio stay untouched (no stored lists yet). +4 frontend tests.
 Nucleus half BUILT (browse/download/view endpoints with the sandbox rules).
 Frontend DEFERRED by the owner ("if not now, later"). **The job:** one new
 pane/screen + error wording for 404/400/409/413/415; medium.
+**SPEC WRITTEN 2026-10-28: docs/FILE-VIEWER-PANE.md** — part 1 the pane
+(frontend only; view via `iframe srcdoc` + `sandbox` without allow-scripts,
+download via an authorised fetch → blob), part 2 one-time download tickets
+(big files + file chips in chat), part 3 upload (new write right, own size
+limit), part 4 live HTML preview on a SEPARATE origin (owner's security
+ruling first).
 
 ## 4. Embedder setting + rebuild banner (FRONTEND-REVAMP §2.11) — TO VERIFY
 
@@ -733,3 +840,13 @@ lesson 14) and rebuild the image — fold into the next image build.
   to Auto keeps today's behaviour. Tests: Text persona + "compare X with Y"
   → text; same persona + "@chart" → chart; Auto persona → classifier.
   Workaround today: add `@text` to the message.
+
+- **CHECK (seen live 2026-10-27, 20:59 and 21:41): "The model provider
+  returned a server error" appears together with an approval card**, twice
+  (run_command `date +%F`, then aaf build_dashboard), with the whole run
+  taking under a second ("5 tool calls · 438 ms"). Suspected: it is NOT the
+  provider — it is the 64 KB pause-save failure (see the approval-pause bug
+  above) reported under the wrong message. Confirm in the nexus-ai log
+  (RequestDataTooBig / 413 on the pause POST at those times). If so: when the
+  pause cannot be saved, say that ("Couldn't hold this step for approval")
+  and never blame the model provider.
