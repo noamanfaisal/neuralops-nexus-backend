@@ -36,6 +36,7 @@ from ai_engine.context.budget import BudgetFitter, budget_for
 from ai_engine.context.context_builder import ContextBuilder
 from ai_engine.context.history_policy import HistoryPolicy
 from ai_engine.core.config import EngineSettings
+from ai_engine.core.honesty import honesty_note, phantom_tool_claims
 from ai_engine.core.nucleus_client import NucleusClient
 from ai_engine.core.turn_rules import (
     acts_with_tools,
@@ -431,6 +432,18 @@ class PydanticAISystem:
                 # IDENTICAL to the streamed deltas (T1's contract) — parsing
                 # must never trim a plain reply.
                 clean = raw
+            # B7 (honesty slip, found live 2026-10-27): a reply that names one
+            # of this persona's tools as attempted, with no such call in the
+            # run, gets a visible correction — never a silent fabrication. The
+            # detector is deliberately narrow (core/honesty.py): exact catalog
+            # names on completed-claim lines only, so honest prose is spared.
+            phantom = phantom_tool_claims(
+                clean, [entry.model_name for entry in catalog], used or [])
+            if phantom:
+                log.warning("honesty: reply %s claims un-run tool(s): %s",
+                            job.msg_id, ", ".join(phantom))
+                if final_type == "text":
+                    clean = clean.rstrip() + "\n\n" + honesty_note(phantom)
             yield AgentEvent(
                 type=AgentEventType.END,
                 id=job.msg_id,

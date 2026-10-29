@@ -208,6 +208,17 @@ class ModelConfig(TenantBaseModel):
         help_text="User must accept the provider's terms of service before this model is active.",
     )
 
+    # -- Save-lock (owner's ruling 2026-10-28, MISSING.md B14) -----------------
+    # When this row last passed a provider check WITH ITS STORED VALUES. Set
+    # only by the check endpoint (intelligence/services.py) when the values
+    # just checked equal the stored ones; cleared by any edit that changes how
+    # the model is reached (provider, model id, api_base, key). The Edit
+    # dialog locks Save while this is empty.
+    last_check_ok_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When the stored values last passed a provider check. Set by the check endpoint only.",
+    )
+
     # -- Prices (Step 1, docs/NUCLEUS-REVAMP.md) -------------------------------
     # Admin-typed OVERRIDE, USD per MILLION tokens. Blank = use the catalog
     # (nucleus.models.usage.ModelPrice, refreshed from an online source).

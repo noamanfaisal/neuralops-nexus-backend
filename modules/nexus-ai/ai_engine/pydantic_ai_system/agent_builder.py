@@ -33,18 +33,28 @@ class AgentBuilder:
         output_type: list = [str, DeferredToolRequests]
         if escalate:
             output_type.append(Escalate)
+        # 7b (owner's ruling 2026-10-20): the CANDIDATE's own numbers — a
+        # fallback or seat with a smaller ceiling generates within it
+        # (deepseek-chat's 8K never borrows the primary's 16K). An older
+        # nucleus fills these from the persona's legacy values upstream
+        # (nucleus_client.model_spec_from), so this is never a behaviour
+        # break, only a sharpening.
+        model_settings: dict = {
+            "temperature": spec.temperature,
+            "max_tokens": spec.max_output_tokens,  # the OUTPUT cap, never the window
+        }
+        # B8 (found live 2026-10-27: Claude was 83% of the project's cost with
+        # ZERO cached tokens — every call re-paid the whole history at full
+        # price). anthropic_cache puts ONE automatic cache breakpoint on the
+        # last cacheable block and moves it forward as the topic grows, so
+        # long conversations read mostly from cache. Anthropic only: OpenAI
+        # and DeepSeek cache by themselves (their usage already showed cached
+        # tokens), and the other providers have no such parameter.
+        if spec.provider == "anthropic":
+            model_settings["anthropic_cache"] = True
         return Agent(
             model=self._models.build(spec),
             instructions=instructions,
             output_type=output_type,
-            # 7b (owner's ruling 2026-10-20): the CANDIDATE's own numbers — a
-            # fallback or seat with a smaller ceiling generates within it
-            # (deepseek-chat's 8K never borrows the primary's 16K). An older
-            # nucleus fills these from the persona's legacy values upstream
-            # (nucleus_client.model_spec_from), so this is never a behaviour
-            # break, only a sharpening.
-            model_settings={
-                "temperature": spec.temperature,
-                "max_tokens": spec.max_output_tokens,  # the OUTPUT cap, never the window
-            },
+            model_settings=model_settings,
         )

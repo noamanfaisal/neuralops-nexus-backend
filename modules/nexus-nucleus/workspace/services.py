@@ -615,6 +615,23 @@ def archive_topic(topic):
     return topic
 
 
+def get_topic_any(company, project, channel, topic_id: str):
+    """Like get_topic, but archived rows count too — the unarchive route's
+    fetch (tester finding 2026-10-28: an archived topic could never come back)."""
+    return ChatTopic.objects.filter(
+        company=company, project=project, channel=channel, id=topic_id,
+    ).first()
+
+
+def unarchive_topic(topic):
+    """The inverse of archive_topic — the row's history is intact, so bringing
+    it back is one flag. Safe to call on an active topic (no-op)."""
+    if not topic.is_active:
+        topic.is_active = True
+        topic.save(update_fields=["is_active", "updated_at"])
+    return topic
+
+
 def mark_topic_read(user, topic) -> None:
     # ChatReadMarker, ChatMessage — imported at top of file.
 

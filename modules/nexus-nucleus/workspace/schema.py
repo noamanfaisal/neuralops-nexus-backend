@@ -89,6 +89,9 @@ class TopicOut(Schema):
     project_id: str
     has_unread: bool = False
     unread_count: int = 0
+    # True only in listings made with include_archived=true — the restore
+    # list tells archived rows apart (tester finding 2026-10-28).
+    archived: bool = False
 
 
 # ── Members ───────────────────────────────────────────────────────────────────
