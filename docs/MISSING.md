@@ -42,8 +42,9 @@ hardening entry (parts 2/5 — no pane, no writer needed); parts 1 and 3
 output) still stand. Remaining Stage 2: the owner's comments file keyed by
 TC id, if any comments come.
 
-**Stage 3 — release chores.** Rotate the exposed OpenAI/Anthropic keys
-(if not already done for the fresh start); Supabase cleanups (legacy
+**Stage 3 — release chores.** ~~Rotate the exposed OpenAI/Anthropic keys~~
+(DONE 2026-10-28, owner terminated the old keys); Supabase cleanups (owner
+does these LAST, right before release) (legacy
 device-verify function, test-install-1 phone_home_events row); regenerate
 engine requirements.lock at next image build (7c); `seed_catalog
 --regenerate` + commit as the release's catalog snapshot.
@@ -99,8 +100,7 @@ easy-install-and-free-trial-plan.
   a separate PRIVATE repo** (`neuralops-demo`); the installer stays bash.
   **Built by the owner's developer** from docs/EASY-INSTALL-TASKS.md (tasks
   1.1–1.5, 2.1–2.8, each with exact behaviour + proof); design in
-  docs/EASY-INSTALL.md. Open: demo length, demo content, max demos at once,
-  how the link is sent, first cloud.
+  docs/EASY-INSTALL.md.
 - **RULINGS 2026-10-28:** (1) demo DNS = **Hostinger's DNS API**; the domain
   stays at Hostinger; demo addresses are `<id>.demo.neuralopsnexus.ai`
   (EASY-INSTALL-TASKS task 2.3, with safety rules: overwrite always false,
@@ -113,40 +113,17 @@ easy-install-and-free-trial-plan.
   the private repo (DEMO-SERVICE.md + DEMO-DNS-HOSTINGER.md), not here.
   Notes: always-free tiers are ~1 GB (too small); OCI's free ARM servers
   need ARM images first; RunPod pods can't run Docker.
-- **Sign-up emails (2026-10-28):** Supabase's built-in mailer only sends to
-  team members, ~2/hour, on every plan. Resend domain neuralopsnexus.ai
-  VERIFIED 2026-10-28 (DKIM added at Hostinger). Remaining: Resend API key
-  -> Supabase custom SMTP (smtp.resend.com:587, user `resend`, sender
-  no-reply@neuralopsnexus.ai) -> raise the email rate limit -> test a
-  sign-up from a non-team address.
+- **Sign-up emails — DONE 2026-10-28 (owner):** Supabase's built-in mailer
+  only sends to team members, ~2/hour, on every plan, so Supabase now uses
+  custom SMTP through Resend (domain neuralopsnexus.ai verified, DKIM at
+  Hostinger; smtp.resend.com:587, sender no-reply@neuralopsnexus.ai).
+  Confirmation emails now reach any address.
 
-**EASY INSTALL — OPEN WORK (checklist; full behaviour + proof per task in
-docs/EASY-INSTALL-TASKS.md; built by the owner's developer):**
-- STEP 1, one-command installer (public repo):
-  - [ ] 1.1 Replace the Cloudflare quick tunnel with **Tailscale Funnel**
-    (`install.sh` question + Tailscale setup, `neuralops` command learns
-    Tailscale, remove `cloudflared` from compose and both scripts)
-  - [ ] 1.2 Resume a half-finished install (`.installed` marker, resume mode,
-    v1 machines get the marker on `neuralops update`)
-  - [ ] 1.3 `get.neuralopsnexus.ai` → install.sh on mapax-io `main` (Vercel
-    redirect + DNS; needs the 1.0.0 merge first)
-  - [ ] 1.4 User docs (readme "Self-hosting" section, EASY-INSTALL.md status)
-  - [ ] 1.5 Owner proof runs P1–P7 (fresh VM Tailscale, VPS with domain,
-    re-run, reboot, backup/update, uninstall/start, Ctrl+C resume)
-- STEP 2, automatic demo servers:
-  - [ ] 2.1 `create_owner --email` reservation (public repo, nucleus; can
-    start now, no cloud needed)
-  - [ ] Demo service (PRIVATE repo `neuralops-demo`, spec DEMO-SERVICE.md):
-    FastAPI request → bot check → email confirmation → rate limits →
-    background job; provider list with credit counting + switching +
-    waitlist; clouds AWS/Google/Azure first (OCI after ARM images; RunPod
-    only with a full VM); DNS via Hostinger (DEMO-DNS-HOSTINGER.md);
-    first-boot install + owner reservation; three-layer auto-delete;
-    Resend emails; "Request a demo" on the website; admin endpoints; tests
-    with fakes; owner proof (DEMO-SERVICE.md §11)
-  - [ ] Owner: cloud credits + demo-only accounts with budget alerts
-  - [ ] Owner decisions: demo length · demo content · limit values ·
-    provider order · where the demo service runs
+**EASY INSTALL + DEMO SERVICE — HANDED TO THE DEVELOPER (owner,
+2026-10-28):** the developer owns the whole track, including the open
+decisions, and is finishing it for a merge. Not tracked in this file any
+more; his reference specs are docs/EASY-INSTALL-TASKS.md and (private repo)
+DEMO-SERVICE.md + DEMO-DNS-HOSTINGER.md.
 
 **FILE VIEWER — OPEN WORK (spec: docs/FILE-VIEWER-PANE.md; the nucleus
 browse/download/view endpoints are BUILT and tested, see §3):**
@@ -223,15 +200,106 @@ browse/download/view endpoints are BUILT and tested, see §3):**
   one reply → no 500, Allow resumes the run. WORKAROUND until then: analytics
   tools on Auto (no pause, no problem) — recommended anyway, they are
   read-only.
-- The aaf-analytics `neuralops` token was shown in a chat on 2026-10-27 —
-  rotate it (analytics `.env` MCP_TOKENS + the NeuralOps secret + restart the
-  analytics stack).
+- ~~The aaf-analytics `neuralops` token was shown in a chat on 2026-10-27 —
+  rotate it~~ **DONE 2026-10-28 (owner terminated the old tokens).**
 - **CHECK — prompt caching on Claude models.** The Usage page (project mktv,
   2026-10-27) showed claude-sonnet-5-5 with 660K input tokens and **0
   cached** (DeepSeek: 48% cached), so every Claude call paid full price for
   the whole history. Check whether the engine enables Anthropic prompt
   caching (cache breakpoints on the system prompt + history); if not, turn
   it on and confirm cached tokens appear on the Usage page.
+
+**FIX ROUND — CODED 2026-10-28 night, in the COPY `/data/code/neuralops-fixwork`
+(+ `-frontend`), NOT in this folder — demo freeze. Pending: commit on a
+`fixround` branch, merge after the demo, run all three suites, restart.**
+What is in the copy, each with tests:
+1. 64 KB pause bug: global cap → 16 MB (`core/settings.py`); the public hook
+   enforces its own 64 KB from Content-Length before parsing
+   (`scheduling/hooks_api.py`); tests: 1 MB pause → 201 intact, 200 KB usage
+   batch → 201 (`internal/tests.py`), 70 KB hook body → 413 at the door,
+   non-JSON → 422 (`scheduling/tests.py`).
+2. Pause-save failure: the engine ends the reply with a worded error
+   (`ai_system.PauseSaveFailed`) instead of a dangling card; `chat/reasons.py`
+   maps it ABOVE the 5xx rule, so it is never blamed on the model provider;
+   tests in `tests/test_approvals.py` (fake nucleus gained `pause_status`)
+   and `chat/tests_reasons.py` (new).
+3. Bearer prefix: `toolset_builder._bearer_token` adds `Bearer ` (both auth
+   kinds, no double prefix, empty → None); tests incl. an on-the-wire header
+   assertion (`tests/test_mcp_dial.py`). After merge: re-save the
+   aaf-analytics secret WITHOUT the hand-typed `Bearer `.
+4. Stray text / glued markers: the event mapper puts a line break between a
+   run's text parts (`event_mapper.py`); `markers.py` accepts an opener glued
+   after sentence punctuation (every type, the pre-marker prose is dropped —
+   it is router/filler junk); the frontend clears the bubble on
+   `deep_escalation` (message-store) and `stripLeakedMarkers` strips glued
+   markers + renders any surviving marker token as a code span, never an
+   autolink. Tests: `test_output_types.py` ot10/ot11, directives + message-
+   store tests.
+5. Persona "Default answer format" respected: resolver order is directive →
+   persona default (not auto) → classifier → text (`resolver.py`,
+   `ai_system.py`); the persona dialogs gained **Auto — decide per question**
+   and NEW personas default to Auto. Tests ot12/ot13.
+   NOTE FOR THE OWNER after merge: existing personas all STORE "text" (the
+   old dialog default), so they will answer in text until set to Auto — set
+   @Dashboard (and any chart-ish persona) to Auto or Chart deliberately.
+6. Change password now verifies the CURRENT password first (Supabase
+   sign-in check before updateUser) with a third field in the dialog;
+   wrong current → refused, nothing changed (`profile-dialog.tsx` + tests).
+7. Rename + unarchive topic (B9, tester finding 3): nucleus gained
+   `POST …/topics/{t}/unarchive/` (right `topic.archive`; restores the
+   soft-deleted row, idempotent) and topic listings accept
+   `?include_archived=true`, each row carrying `archived`
+   (`workspace/services.py` get_topic_any/unarchive_topic, `api.py`,
+   `schema.py`; `TopicUnarchiveTests` in `workspace/tests.py`). Frontend:
+   a rename pencil per row (gated `topic.update`, never on the configure
+   topic — its provisioned title is the one signal that marks it) opening
+   a dialog seeded with the current name, and a collapsed “Archived
+   chats” section (fetched only when opened) with a Restore button per
+   row (gated `topic.archive`; the restored chat opens; a 404 from an
+   older server gets the worded “needs a newer NeuralOps” toast) —
+   `chat-list-panel.tsx`, `lib/api/workspace.ts` (listTopics
+   include_archived + unarchiveTopic), `use-workspace.ts`
+   (useArchivedTopics / useUnarchiveTopic / useRenameTopic), new
+   `chat-list-panel.test.tsx`.
+8. Model Edit dialog Save-lock (B14, ruled 2026-10-28): nucleus
+   ModelConfig gained `last_check_ok_at` (migration 0043), SET only by the
+   check endpoint when the values just checked are exactly the stored ones
+   (a pre-save check of edited values never stamps), CLEARED by any PATCH
+   that changes the reach (provider, model id, api_base, key — re-saving
+   the same key keeps it); `ModelConfigOut.last_check_ok_at` ships it
+   (`intelligence/services.py` _stamp_check_pass + update_model_config,
+   `schema.py`, `api.py`; `SaveLockTests` in `intelligence/tests.py`).
+   Frontend Edit dialog: never-passed opens with Save locked + a hint;
+   Check (current form values) unlocks; a reach change re-locks; after a
+   reach-changing save the dialog fires one check of the newly stored
+   values so the server stamps them (no wasted double-check — pinned by
+   test); a server without the field NEVER locks (`models-tab.tsx` +
+   "Save-lock" describe in `models-tab.test.tsx`).
+9. Detach-model wording (B10): VERIFIED, no code needed — the backend 409
+   already names the personas ("still used by: …"), and the frontend's
+   useSetModelConfigProject surfaces e.message as the toast verbatim.
+10. Claude prompt caching (B8): the engine never asked Anthropic to cache —
+    `agent_builder.py` now sets `anthropic_cache: True` (pydantic-ai 2.55's
+    automatic, forward-moving cache breakpoint) on Anthropic specs only;
+    UsageReader already reads cache_read/cache_write, so cached tokens will
+    show on the Usage page from the first long topic after the merge. Tests
+    test_b8_* in `tests/test_7b_generation.py`.
+11. Honesty slip (B7): two defences. (a) The tool-catalog prompt section now
+    bans invented ATTEMPTS like invented results ("never say a tool was
+    called, attempted or failed in this reply unless that call really
+    happened in this reply") — `prompts/layout.py`. (b) A narrow detector
+    (`core/honesty.py` + hook in `ai_system.py`): a reply that names one of
+    the persona's EXACT tool names on a completed-claim line (attempted/ran/
+    called/… or a → arrow) for a tool with no matching call in the run gets
+    a visible "Correction (added automatically)" appended (text replies;
+    always logged) — memory ("earlier we ran …"), intent ("I will run …")
+    and honest inability ("couldn't call …") are all spared, pinned by
+    `tests/test_honesty.py` (unit + two e2e through the harness).
+12. TESTER-GUIDE "nudge" (B11): T-13 now says what a nudge IS (an ordinary
+    message typed while the persona is still replying), docs only. The
+    composer hint while a reply streams stays a nice-to-have.
+Still open from the fix round: ONLY T16 (retest the long-topic table after
+B3+B4 — needs the tester's persona + topic, owner's A7).
 
 **TESTER ROUND 2026-10-28 (owner's tester, TESTER-GUIDE):** passed T15–T20,
 T32–T34, and the walkthrough items photo, about/version, pane rail,
@@ -283,9 +351,7 @@ owner verifying daily):**
    connects + file viewer pane (security ruling first).
    UPDATE 2026-10-28: file viewer parts 1–3 (pane, download tickets,
    upload) don't need the ruling and can ship earlier; only part 4 (live
-   preview) waits for it. Easy install (Step 1) and `create_owner --email`
-   run ALONGSIDE this queue — they sit at the top of Stage 4 (see the EASY
-   INSTALL checklist above).
+   preview) waits for it.
 
 Still parked (unchanged): local login UI, gateway mint-for-others,
 delegation/tool_access/approval_scope toggles, portal guess-brake,
@@ -550,7 +616,8 @@ lesson 14) and rebuild the image — fold into the next image build.
 - If the nexus-ai-new container is ever RECREATED before the image rebuild
   (7c): re-run `docker exec neuralops-nexus-ai-new
   /opt/venv/nexus-ai-env/bin/pip install "pydantic-ai-slim[web-fetch]"`.
-- Rotate the OpenAI/Anthropic keys that appeared in earlier terminal pastes.
+- ~~Rotate the OpenAI/Anthropic keys that appeared in earlier terminal pastes.~~
+  DONE 2026-10-28.
 - Git commits in BOTH repos — **DONE 2026-10-21 17:11**: backend 581d21b
   (step8-switchover), frontend 79bcef4 (noamanfaisal) — the whole revamp
   through the spend limit, suites 469/116/1140 all green at commit time.
@@ -779,9 +846,17 @@ lesson 14) and rebuild the image — fold into the next image build.
 
 - MCP connector toggles ship WITH the bundled connectors (scope ruling: no
   dead switches) — MCP track.
-- Edit dialog: gate Save behind a passed check the way Register now is?
-  (Today: Edit checks on save when the reach changed; the explicit Check
-  button exists. Owner to rule if Save should also lock.)
+- **Model Edit dialog — RULED (owner, 2026-10-28): lock Save until the
+  model has passed a check.** A model that has never passed a check opens
+  with Save locked; the person clicks **Check**, and on a pass Save unlocks.
+  Once a model has passed, Save stays enabled for ordinary edits (name,
+  notes, generation settings). If the person changes how it is reached
+  (provider, API base, model id, key), Save locks again until a fresh check
+  passes. Build: frontend (models-tab edit dialog, like Register) + a
+  `last_checked_ok_at` (or similar) on ModelConfig so "has passed before"
+  survives a reload (nucleus field + migration, set by the check endpoint).
+  Tests: never-checked → Save locked; check passes → unlocked; checked model
+  + rename → Save enabled; checked model + new key → locked until re-check.
 - gpt-5.x pricing rows in the price catalog — watch the Usage page's
   unpriced_rows (≥) on new models; the catalog refresh task may lag new ids.
 

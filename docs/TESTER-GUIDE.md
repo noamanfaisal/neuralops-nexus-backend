@@ -85,7 +85,10 @@ labeled as estimated.
 
 **T-13 — Stop and nudge.** Ask for something long ("write 10 paragraphs
 about rivers"). While it runs, press **Stop**. Ask again, and this time
-send a **nudge** ("make it about mountains instead") while it runs.
+send a **nudge** while it runs. A nudge is not a button: it is an ordinary
+message you type and send in the composer WHILE the persona is still
+writing its reply (e.g. "make it about mountains instead") — the persona
+reads it mid-run and changes course instead of starting a new reply.
 Expect: Stop ends the reply where it is; the nudge visibly steers the
 rest of the reply.
 
