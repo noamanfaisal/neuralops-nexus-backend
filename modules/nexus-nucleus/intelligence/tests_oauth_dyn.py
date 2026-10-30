@@ -202,3 +202,84 @@ class OAuthRoadsApiTests(MentionRightFixture):
             self.assertTrue(preset["authorize_endpoint"].startswith("https://"))
             self.assertTrue(preset["token_endpoint"].startswith("https://"))
             self.assertNotIn("client_secret", preset)   # the secret NEVER ships
+            # WP4 road 2b: all three demand the vendor secret at the exchange,
+            # so all three exchange THROUGH THE PORTAL, named by catalog id.
+            self.assertEqual(preset["exchange_mode"], "portal")
+            self.assertEqual(preset["exchange_provider"], entry_id)
+
+    def test_a_portal_exchange_preset_sends_the_code_to_the_portal_not_the_provider(self):
+        """Road 2b (WP4) — exchange_mode "portal": the vendor secret lives only
+        on the portal, so the callback POSTs {provider, code, verifier} to the
+        portal's oauth-exchange function and stores the token IT answers; the
+        provider's token endpoint is never dialed from this install."""
+        server = self._server(
+            client_id="vendor-neuralops", authorize_endpoint="https://p/a",
+            token_endpoint="https://provider.example/token", scopes=["read"],
+            redirect_mode="portal_relay", exchange_mode="portal",
+            exchange_provider="google-drive", token_env_var="GDRIVE_TOKEN",
+        )
+        state = signing.dumps(
+            {"server_id": str(server.id), "frontend_origin": "http://localhost:3000",
+             "code_verifier": "the-exact-verifier", "server_url": "http://x"},
+            salt=oauth_client._SIGNING_SALT,
+        )
+        with self.settings(SUPABASE_OAUTH_EXCHANGE_URL="https://portal.test/functions/v1/oauth-exchange"), \
+             patch("intelligence.oauth_client.httpx.post") as post, \
+             patch("intelligence.oauth_client.OAuth2Client.fetch_token") as fetch:
+            post.return_value = FakeResp(200, {"access_token": "at-portal",
+                                               "refresh_token": "rt-portal", "expires_in": 3600})
+            result = oauth_client.complete_callback(code="the-code", state=state)
+        fetch.assert_not_called()
+        self.assertEqual(result["server_id"], str(server.id))
+        self.assertEqual(post.call_args.args[0], "https://portal.test/functions/v1/oauth-exchange")
+        self.assertEqual(post.call_args.kwargs["json"], {
+            "provider": "google-drive", "grant_type": "authorization_code",
+            "code": "the-code", "code_verifier": "the-exact-verifier",
+        })
+        server.refresh_from_db()
+        self.assertEqual(server.get_secrets()["GDRIVE_TOKEN"], "at-portal")
+        self.assertEqual(server.get_secrets()["refresh_token"], "rt-portal")
+
+    def test_a_refused_portal_exchange_is_worded_and_the_refresh_rides_the_portal_too(self):
+        """Road 2b — the two failure/refresh halves: a portal refusal surfaces
+        as the function's own words (never a stack trace), and a stale token's
+        silent refresh goes through the SAME portal door (these providers
+        demand the secret on refresh as well)."""
+        server = self._server(
+            client_id="vendor-neuralops", authorize_endpoint="https://p/a",
+            token_endpoint="https://provider.example/token",
+            redirect_mode="portal_relay", exchange_mode="portal",
+            exchange_provider="atlassian", token_env_var="ATLASSIAN_TOKEN",
+            expires_at="2020-01-01T00:00:00+00:00",   # long stale → must refresh
+        )
+        state = signing.dumps(
+            {"server_id": str(server.id), "frontend_origin": "http://localhost:3000",
+             "code_verifier": "v", "server_url": "http://x"},
+            salt=oauth_client._SIGNING_SALT,
+        )
+        with self.settings(SUPABASE_OAUTH_EXCHANGE_URL="https://portal.test/fn"), \
+             patch("intelligence.oauth_client.httpx.post") as post:
+            post.return_value = FakeResp(502, {"error": "bad code"})
+            with self.assertRaises(ValueError) as ctx:
+                oauth_client.complete_callback(code="the-code", state=state)
+        self.assertIn("bad code", str(ctx.exception))
+        # nothing was stored on the refusal
+        server.refresh_from_db()
+        self.assertNotIn("ATLASSIAN_TOKEN", server.get_secrets())
+
+        # the refresh half: a stored refresh_token + stale expiry → one portal
+        # POST with grant_type refresh_token, and the new token lands
+        secrets = server.get_secrets()
+        secrets["refresh_token"] = "rt-old"
+        server.set_secrets(secrets)
+        server.save()
+        with self.settings(SUPABASE_OAUTH_EXCHANGE_URL="https://portal.test/fn"), \
+             patch("intelligence.oauth_client.httpx.post") as post:
+            post.return_value = FakeResp(200, {"access_token": "at-fresh", "expires_in": 3600})
+            ok = oauth_client.refresh_if_needed(server)
+        self.assertTrue(ok)
+        self.assertEqual(post.call_args.kwargs["json"], {
+            "provider": "atlassian", "grant_type": "refresh_token", "refresh_token": "rt-old",
+        })
+        server.refresh_from_db()
+        self.assertEqual(server.get_secrets()["ATLASSIAN_TOKEN"], "at-fresh")

@@ -40,9 +40,9 @@ MCP_CATALOG = [
         "needs": ["A GitHub personal access token with the scopes you want the persona to have"],
         "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
         # GitHub's token exchange DEMANDS the client secret even for PKCE
-        # clients, so this preset only becomes connectable with the
-        # relay-exchange variant (specced in NUCLEUS-REVAMP, built when the
-        # vendor app is registered). Kept here so the shape ships once.
+        # clients — covered by the portal's oauth-exchange function (road 2b,
+        # WP4): the install sends the code there, only the portal holds the
+        # secret. Connectable once the vendor app's client_id lands here.
         "oauth_preset": {
             "client_id": "",
             "authorize_endpoint": "https://github.com/login/oauth/authorize",
@@ -50,6 +50,8 @@ MCP_CATALOG = [
             "scopes": ["repo", "read:org"],
             "authorize_params": {},
             "redirect_mode": "portal_relay",
+            "exchange_mode": "portal",
+            "exchange_provider": "github",
             "token_env_var": "GITHUB_TOKEN",
         },
     },
@@ -73,6 +75,9 @@ MCP_CATALOG = [
             "scopes": ["read:jira-work", "write:jira-work", "read:confluence-content.all", "offline_access"],
             "authorize_params": {"audience": "api.atlassian.com", "prompt": "consent"},
             "redirect_mode": "portal_relay",
+            # Atlassian 3LO also demands the secret at the exchange — road 2b.
+            "exchange_mode": "portal",
+            "exchange_provider": "atlassian",
             "token_env_var": "ATLASSIAN_TOKEN",
         },
     },
@@ -149,6 +154,10 @@ MCP_CATALOG = [
             # back a refresh_token (it omits one otherwise).
             "authorize_params": {"access_type": "offline", "prompt": "consent"},
             "redirect_mode": "portal_relay",
+            # Google demands the vendor secret at the exchange — the portal's
+            # oauth-exchange function does it (road 2b, WP4).
+            "exchange_mode": "portal",
+            "exchange_provider": "google-drive",
             "token_env_var": "GDRIVE_TOKEN",
         },
     },

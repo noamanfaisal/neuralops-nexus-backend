@@ -577,9 +577,37 @@ hand-over note; project-level holder sees no picker and mints for themself).
   brake with a console warning, so claiming keeps working until the table
   exists. OWNER: SQL Editor → run schema.sql's claim_attempts block, then
   redeploy the `device-claim` function.
-- **OAuth relay + vendor "NeuralOps" app registrations** — the catalog's
-  oauth_preset client_ids are empty until the vendor apps exist; until then
-  the "Connect with NeuralOps" button rightly stays hidden.
+- **OAuth relay + vendor "NeuralOps" app registrations — THE MIDDLE SERVER
+  IS BUILT 2026-10-30 (owner's 00:05 ask: "we will have to have a middle
+  server, because our server can be anywhere"); only the vendor app
+  registrations remain (owner-only).** Two halves, both coded + tested:
+  · **The relay page** `portal/oauth-relay/index.html` — static, hosted at
+  {NEURALOPS_PORTAL_URL}/oauth/relay (the ONE redirect URI every vendor app
+  knows); reads server_url out of the signed-not-encrypted state (split on
+  ":" — django signing's separator, pinned by the relay-mode test) and
+  bounces the browser to the install's FIXED callback path with the
+  provider's query verbatim. Stores nothing, holds no secret.
+  · **The exchange function** `portal/supabase/functions/oauth-exchange/` —
+  Google, Atlassian AND GitHub all demand the vendor secret at the token
+  exchange (and on refresh), so installs POST {provider, code,
+  code_verifier} there (anon-key headers, like device-request); only the
+  function holds the secrets (its env); providers + token endpoints are
+  hardcoded server-side, redirect_uri never caller-supplied; the token JSON
+  returns verbatim and is stored only on the install.
+  · **Nucleus**: presets gain exchange_mode="portal" + exchange_provider;
+  oauth_client.complete_callback and refresh_if_needed route through
+  SUPABASE_OAUTH_EXCHANGE_URL (new setting) for such configs; the direct
+  road is untouched for everything else. TESTS: tests_oauth_dyn +2 (the
+  code+verifier go to the portal and the provider is never dialed; a
+  refusal is worded and stores nothing; the refresh rides the portal) and
+  the preset pin now demands exchange_mode/exchange_provider on all three.
+  OWNER (portal/oauth-relay/README.md has the exact steps): host the relay
+  page · deploy oauth-exchange · register the three vendor apps with the one
+  relay URI · set the six function secrets · hand the three PUBLIC
+  client_ids to the developer to fill mcp_catalog. STILL FRONTEND-SIDE
+  (after the client_ids land): the "Connect with NeuralOps" tile pre-fill —
+  today's create dialog copies no oauth fields from a preset, so the button
+  stays rightly hidden until then.
 - **Step 8 distribution half** — rebuild the PRODUCTION profile around the
   unified image's new engine (nexus-ai-new semantics, chromadb retirement),
   publish the image. Large; its own step.

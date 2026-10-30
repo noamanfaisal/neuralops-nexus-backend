@@ -96,6 +96,30 @@ def build_authorize_url(server, frontend_origin: str) -> str:
     return url
 
 
+def _portal_exchange(cfg: dict, fields: dict) -> dict:
+    """Road 2b (WP4): providers whose token exchange DEMANDS the vendor app's
+    client secret (Google, Atlassian, GitHub). The secret never ships in the
+    image and never reaches an install — the portal's oauth-exchange function
+    alone holds it, so the code (+ PKCE verifier) goes THERE and the token
+    JSON comes back. The portal stores nothing; the token lives only here."""
+    from authn.portal import _headers
+
+    url = getattr(settings, "SUPABASE_OAUTH_EXCHANGE_URL", "")
+    if not url:
+        raise ValueError("This preset exchanges through the portal, and no "
+                         "portal exchange is configured (SUPABASE_OAUTH_EXCHANGE_URL).")
+    body = {"provider": cfg.get("exchange_provider") or "", **fields}
+    response = httpx.post(url, json=body, headers=_headers(), timeout=30)
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    if response.status_code != 200 or not isinstance(data, dict) or not data.get("access_token"):
+        detail = (data.get("error") if isinstance(data, dict) else None) or f"status {response.status_code}"
+        raise ValueError(f"The portal exchange was refused: {detail}")
+    return data
+
+
 def complete_callback(code: str, state: str) -> dict:
     """Exchange code→tokens, store them. Returns {"server_id", "frontend_origin"}."""
     from nucleus.models import MCPServer
@@ -108,17 +132,24 @@ def complete_callback(code: str, state: str) -> dict:
         raise ValueError("MCP server not found or no longer OAuth2.")
 
     cfg = server.oauth_config or {}
-    secrets = server.get_secrets()
-    client = OAuth2Client(
-        client_id=cfg["client_id"],
-        client_secret=secrets.get("client_secret"),
-        redirect_uri=_redirect_uri(cfg),
-        headers={"Accept": "application/json"},
-    )
-    fetch_kwargs = {"code": code}
-    if data.get("code_verifier"):
-        fetch_kwargs["code_verifier"] = data["code_verifier"]
-    token = client.fetch_token(cfg["token_endpoint"], **fetch_kwargs)
+    if cfg.get("exchange_mode") == "portal":
+        # Road 2b: the portal holds the vendor secret and does the exchange.
+        fields = {"grant_type": "authorization_code", "code": code}
+        if data.get("code_verifier"):
+            fields["code_verifier"] = data["code_verifier"]
+        token = _portal_exchange(cfg, fields)
+    else:
+        secrets = server.get_secrets()
+        client = OAuth2Client(
+            client_id=cfg["client_id"],
+            client_secret=secrets.get("client_secret"),
+            redirect_uri=_redirect_uri(cfg),
+            headers={"Accept": "application/json"},
+        )
+        fetch_kwargs = {"code": code}
+        if data.get("code_verifier"):
+            fetch_kwargs["code_verifier"] = data["code_verifier"]
+        token = client.fetch_token(cfg["token_endpoint"], **fetch_kwargs)
     _store_token(server, token)
     return {"server_id": data["server_id"], "frontend_origin": data["frontend_origin"]}
 
@@ -224,6 +255,15 @@ def refresh_if_needed(server) -> bool:
     expires_at = cfg.get("expires_at")
     if expires_at and timezone.datetime.fromisoformat(expires_at) > timezone.now() + timedelta(seconds=60):
         return True  # still valid, nothing to do
+    if cfg.get("exchange_mode") == "portal":
+        # Road 2b: these providers demand the vendor secret on REFRESH too.
+        try:
+            token = _portal_exchange(cfg, {"grant_type": "refresh_token",
+                                           "refresh_token": refresh_token})
+        except Exception:
+            return False  # refused/unreachable -- needs a real re-auth
+        _store_token(server, token)
+        return True
     client = OAuth2Client(
         client_id=cfg["client_id"],
         client_secret=secrets.get("client_secret"),

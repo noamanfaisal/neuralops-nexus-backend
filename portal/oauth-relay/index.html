@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<!--
+  NeuralOps portal — the OAuth RELAY (the "middle server", Step 6 road 2).
+
+  WHY THIS EXISTS: every NeuralOps install lives at its own address, but a
+  vendor OAuth app (Google, Atlassian, …) accepts only a FIXED list of
+  redirect URIs. So the provider is registered with exactly ONE redirect:
+
+      https://<portal domain>/oauth/relay
+
+  and this page bounces each consent straight back to the install that
+  started it. The install put its own address into the OAuth `state` before
+  the consent screen (intelligence/oauth_client.py build_authorize_url):
+  Django signing.dumps = base64url(JSON) + ":" + timestamp + ":" + signature
+  — SIGNED, NOT ENCRYPTED, so this page can READ server_url without any key,
+  while only the install itself can VERIFY the signature when the browser
+  arrives home. (Pinned by nucleus's
+  test_portal_relay_mode_points_the_provider_at_the_portal_and_state_carries_home.)
+
+  WHAT THIS PAGE NEVER DOES: it stores nothing, calls nothing, holds no
+  secret and completes no exchange — it forwards the provider's own query
+  string (code + state, or error) to the install's FIXED callback path:
+
+      {server_url}/api/v1/mcp-servers/oauth/callback/?<query, verbatim>
+
+  The code is useless anywhere else: the exchange needs the PKCE verifier,
+  which travels only inside the signed state and is checked at home. The
+  path is fixed, so a crafted state can at worst bounce a browser to
+  /api/v1/mcp-servers/oauth/callback/ on a host of the crafter's choosing —
+  carrying only a code that no one but the real install can redeem.
+
+  Providers whose token exchange DEMANDS the client secret even with PKCE
+  (GitHub) cannot use this hop — they wait for the server-side
+  relay-exchange variant (NUCLEUS-REVAMP; built when we wire GitHub).
+
+  HOSTING: static, same host as the claim page. Serve this file at
+  GET /oauth/relay (e.g. copy it to <webroot>/oauth/relay/index.html — most
+  static servers and nginx `try_files $uri $uri/index.html` do the rest).
+  It must be reachable WITHOUT any auth header: the visitor is the person's
+  browser mid-bounce, sent by the provider.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>NeuralOps — connecting…</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: grid; place-items: center;
+           min-height: 100vh; margin: 0; background: #0b0d10; color: #e7e9ec; }
+    main { max-width: 34rem; padding: 2rem; text-align: center; }
+    h1 { font-size: 1.1rem; font-weight: 600; }
+    p { font-size: .9rem; color: #9aa1aa; line-height: 1.5; }
+    code { background: #161a1f; border-radius: 6px; padding: .1em .4em; font-size: .85em; }
+  </style>
+</head>
+<body>
+  <main id="m">
+    <h1>Finishing the connection…</h1>
+    <p>Sending you back to your NeuralOps server.</p>
+  </main>
+  <script>
+    "use strict";
+    // No dependencies on purpose: the state is read, never verified here.
+    function fail(message) {
+      document.getElementById("m").innerHTML =
+        "<h1>This connection could not be completed</h1><p>" + message +
+        "</p><p>Close this tab and start the connect again from your NeuralOps server.</p>";
+    }
+    try {
+      var params = new URLSearchParams(location.search);
+      var state = params.get("state") || "";
+      if (!state) throw new Error("The provider sent no state.");
+
+      // Django signing.dumps: "<base64url(JSON)>:<timestamp>:<signature>".
+      // A payload starting with "." would be zlib-compressed (compress=True);
+      // the install never compresses, so refuse rather than misread.
+      var payload = state.split(":")[0];
+      if (!payload) throw new Error("The state is not in the install's format.");
+      var b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) b64 += "=";
+      var data = JSON.parse(atob(b64));
+
+      var home = String(data.server_url || "").replace(/\/+$/, "");
+      if (!/^https?:\/\/[^\/@\s]+(\/[^@\s]*)?$/.test(home)) {
+        throw new Error("The state names no valid server address.");
+      }
+      // The FIXED callback path + the provider's own query, verbatim
+      // (code+state on success; error+error_description on a refusal —
+      // the install words both). Nothing is added and nothing is kept.
+      location.replace(home + "/api/v1/mcp-servers/oauth/callback/" + location.search);
+    } catch (e) {
+      fail(String(e && e.message || e));
+    }
+  </script>
+</body>
+</html>

@@ -204,6 +204,14 @@ NEURALOPS_PORTAL_URL = os.getenv(
     "NEURALOPS_PORTAL_URL",
     "https://neuralops-nexus-auth.mapax.io",
 )
+# WP4 road 2b: the portal's oauth-exchange function — the famous providers
+# demand the vendor app's client secret at the token exchange, so installs
+# send the code THERE and only the portal holds the secrets. Empty = the
+# portal-exchange road is off and such presets refuse with words.
+SUPABASE_OAUTH_EXCHANGE_URL = os.getenv(
+    "SUPABASE_OAUTH_EXCHANGE_URL",
+    "https://xgfsxikypxjhqlutiepw.supabase.co/functions/v1/oauth-exchange",
+)
 
 # Step 4 — local (offline) sign-in: a user who set a password in their
 # profile can sign in without Supabase. Tokens are HS256, signed with this
