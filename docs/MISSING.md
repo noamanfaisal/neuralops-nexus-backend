@@ -56,8 +56,15 @@ thing we need to do immediately"). TOP OF STAGE 4, ahead of chains v2** —
 the owner's reason: "this is the biggest blocker, that normal people wont
 even try it". Full design + open rulings: the owner's private project doc
 easy-install-and-free-trial-plan.
-- **Phase 1 — one-command Linux installer: BUILT 2026-10-24, pending the
-  owner's fresh-server proof run.** Mechanism (owner left it to Claude): a
+- **Phase 1 — one-command Linux installer: BUILT 2026-10-24, reworked &
+  verified 2026-10-25** (upstream rework, merged 2026-10-30: multi-arch
+  images, `linux/amd64` + `linux/arm64` on Docker Hub; the ONE question is
+  now Tailscale Funnel [default] or a domain via Caddy; interrupted installs
+  cleanly RESUME — secrets kept, previous choices re-used; complete installs
+  stop safely; shellcheck clean, 0 warnings on both scripts; verified LIVE on
+  Ubuntu 24.04 aarch64: fresh install, resume after interrupt, re-run
+  "already installed" exit 0, backup and status). Original build record kept
+  below. Mechanism (owner left it to Claude): a
   bash installer over the SAME production compose stack that smoke-passed
   2026-10-22 — no new image, nothing to push. `install.sh` (repo root):
   checks Linux/x86_64/memory/disk, installs Docker if missing (asks), asks
@@ -92,15 +99,22 @@ easy-install-and-free-trial-plan.
 - **RULINGS 2026-10-25:** the installer's no-domain path is **Tailscale
   Funnel** (anyone with the link; `serve` as a setting) — the Cloudflare
   quick tunnel is dropped; a half-finished install must RESUME (`.installed`
-  marker). Step 2 is NOT a self-serve trial but **one-click demo servers for
+  marker) — **BUILT & VERIFIED** in the upstream rework. Step 2 is NOT a
+  self-serve trial but **one-click demo servers for
   people who request a demo**: we create a cloud server (AWS / Google /
   Azure, on free startup credits), the installer runs unattended, and
   `create_owner --email <requester>` reserves ownership for that verified
   email; each server deletes itself at the end. The demo tool is **Python in
   a separate PRIVATE repo** (`neuralops-demo`); the installer stays bash.
-  **Built by the owner's developer** from docs/EASY-INSTALL-TASKS.md (tasks
-  1.1–1.5, 2.1–2.8, each with exact behaviour + proof); design in
-  docs/EASY-INSTALL.md.
+  **Tasks 1.1, 1.2, 1.4 and 2.1 BUILT by the developer** from
+  docs/EASY-INSTALL-TASKS.md (tasks 1.1–1.5, 2.1–2.8, each with exact
+  behaviour + proof); design in docs/EASY-INSTALL.md. Task 2.1
+  (`create_owner --email`) landed in public nucleus: model `OwnerReservation`
+  + authn migration **0008**, non-interactive `--email` reservation storage,
+  auto-claim on verified email sign-in/connect via `auth_verify`, 7-test
+  suite `authn.tests_step4` (upstream's full nucleus suite green at 471 OK;
+  re-verify at our higher count when the dev stack next runs — migration
+  0008 must be applied then).
 - **RULINGS 2026-10-28:** (1) demo DNS = **Hostinger's DNS API**; the domain
   stays at Hostinger; demo addresses are `<id>.demo.neuralopsnexus.ai`
   (EASY-INSTALL-TASKS task 2.3, with safety rules: overwrite always false,
