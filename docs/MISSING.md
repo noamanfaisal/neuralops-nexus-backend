@@ -556,11 +556,16 @@ Backend endpoints exist and wait (/auth/local/signin, set-password,
 reset-password). Supabase stays the only login road in the UI until the
 owner unparks this.
 
-## 6. Gateway: mint a token FOR someone else
+## 6. Gateway: mint a token FOR someone else — **BUILT 2026-10-30**
 
 The server supports POST /gateway/tokens/ with user_id (company-level
-holders only). The new Gateway page mints for yourself only. Small
-frontend addition (a member picker) when wanted.
+holders only). **BUILT:** the Mint dialog gains an "Acts as" member picker
+(default: Myself) — shown ONLY to a company-level gateway.token holder (a
+project-level holder keeps the self-only dialog); the mint POST carries
+user_id, and the one-time token showing names who it acts as with a "hand
+it to them over a safe channel, never through a chat" note. TESTS: frontend
+gateway-tab +2 (company holder picks a member → user_id in the body + the
+hand-over note; project-level holder sees no picker and mints for themself).
 
 ## 7. Portal / distribution track
 
