@@ -71,10 +71,10 @@ def _lock_for(topic_id: str) -> asyncio.Lock:
     return entry[1]
 
 
-async def end_stopped_reply(channel: str, msg_id: str, content: str, activity_trail: list | None = None, nudges: list[str] | None = None) -> None:
+async def end_stopped_reply(channel: str, msg_id: str, content: str, activity_trail: list | None = None, nudges: list[str] | None = None, files: list | None = None) -> None:
     """The reader stopped the run: keep what streamed, tell the topic, drop the signal."""
     try:
-        await sync_to_async(update_ai_message)(msg_id, content, stopped=True, activity_trail=activity_trail, nudges=nudges)
+        await sync_to_async(update_ai_message)(msg_id, content, stopped=True, activity_trail=activity_trail, nudges=nudges, files=files)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[relay] failed to save stopped message %s: %s", msg_id, exc)
     await publish_async(channel, with_usage({
@@ -84,6 +84,7 @@ async def end_stopped_reply(channel: str, msg_id: str, content: str, activity_tr
         "output_type": "text",
         "render_as": "text",
         "stopped": True,  # the reader ended it; content is what streamed
+        "files": files or [],  # what it wrote before the stop stays real
     }, None))
     await stop_signals().clear(msg_id)
 
@@ -249,6 +250,10 @@ async def _run_reply(client, job, *, msg_id, channel, company, project, topic, t
     retrieved_sources: list | None = None
     nudges_taken: list[str] = []
     activity_trail: list = []
+    # File viewer part 2: the files this reply's WRITE tools touched (the
+    # engine stamps tool_result.path on write/edit/append/create calls) —
+    # confirmed against the project folder at save time and chipped.
+    written_paths: list[str] = []
     stopped = False
     paused = False
 
@@ -283,6 +288,9 @@ async def _run_reply(client, job, *, msg_id, channel, company, project, topic, t
                 if ended:
                     await publish_async(channel, ended)
                 remember_tool_call(activity_trail, event)
+                written = ((event.get("tool_result") or {}).get("path") or "").strip()
+                if written and written not in written_paths:
+                    written_paths.append(written)
 
             elif event_type == "nudge_taken":
                 text = (event.get("nudge") or "").strip()
@@ -351,8 +359,19 @@ async def _run_reply(client, job, *, msg_id, channel, company, project, topic, t
         logger.warning("[relay] streaming error for msg %s: %s: %s", msg_id, type(exc).__name__, exc)
         ai_error = ai_error or f"streaming error: {type(exc).__name__}: {exc}"
 
+    # The chips: only files that really exist in the project folder now, with
+    # their true sizes — a claim the folder can't back is not a chip. Guarded:
+    # chips must never fail a reply.
+    files: list = []
+    if written_paths:
+        try:
+            from workspace.files import stat_files
+            files = await sync_to_async(stat_files)(project, written_paths)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[relay] file chips unavailable for msg %s: %s", msg_id, exc)
+
     if stopped:
-        await end_stopped_reply(channel, msg_id, "".join(streamed), activity_trail, nudges=nudges_taken)
+        await end_stopped_reply(channel, msg_id, "".join(streamed), activity_trail, nudges=nudges_taken, files=files)
         await repost_untaken_nudges(company, project, topic, msg_id, channel)
         return
 
@@ -410,6 +429,7 @@ async def _run_reply(client, job, *, msg_id, channel, company, project, topic, t
                 used_tools=used_tools,
                 retrieved_sources=retrieved_sources,
                 embed_description=embed_description,
+                files=files,
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[relay] failed to update AI message %s: %s", msg_id, exc)
@@ -425,6 +445,7 @@ async def _run_reply(client, job, *, msg_id, channel, company, project, topic, t
         "answered_by_model": answered_by_model,
         "used_tools": used_tools or [],
         "retrieved_sources": retrieved_sources or [],
+        "files": files or [],  # part 2: chips under the bubble
     }, usage))
     # A nudge the persona never reached is a message now, not a lost word.
     await repost_untaken_nudges(company, project, topic, msg_id, channel)

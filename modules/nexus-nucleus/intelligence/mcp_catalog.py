@@ -165,9 +165,81 @@ MCP_CATALOG = [
         "needs": ["A repository inside the project folder"],
         "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
     },
+    # ── 1.2.0 tiles (owner's list, 2026-10-22 19:45): Bitbucket, a graph-DB
+    # context server, AWS, Vercel, diagrams/charts. Content like everything
+    # above — each entry is to be VERIFIED against the real service before
+    # release (the ruling says tested, and package names rot).
+    {
+        "id": "bitbucket",
+        "title": "Bitbucket",
+        "description": "Pull requests, repositories and code search in your Bitbucket Cloud workspace.",
+        "category": "Software",
+        "server_type": "local",
+        "transport": "stdio",
+        "command": "npx -y @aashari/mcp-server-atlassian-bitbucket",
+        "url": None,
+        "auth_type": "static_secrets",
+        "needs": ["Your Bitbucket workspace name", "An Atlassian API token for a user with access to it"],
+        "docs": "https://github.com/aashari/mcp-server-atlassian-bitbucket",
+    },
+    {
+        "id": "neo4j",
+        "title": "Neo4j graph",
+        "description": "The graph-context option: run Cypher against a Neo4j graph, with the schema exposed so a persona can write its own queries.",
+        "category": "Data",
+        "server_type": "local",
+        "transport": "stdio",
+        "command": "uvx mcp-neo4j-cypher",
+        "url": None,
+        "auth_type": "static_secrets",
+        "needs": ["The database's connection URI (neo4j:// or bolt://)", "A database user and password"],
+        "docs": "https://github.com/neo4j-contrib/mcp-neo4j",
+    },
+    {
+        "id": "aws",
+        "title": "AWS",
+        "description": "AWS Labs' API server: describe, create and change AWS resources — exactly as far as the credentials you give it reach.",
+        "category": "Infrastructure",
+        "server_type": "local",
+        "transport": "stdio",
+        "command": "uvx awslabs.aws-api-mcp-server@latest",
+        "url": None,
+        "auth_type": "static_secrets",
+        "needs": ["AWS credentials (an access key, or a profile on the server) scoped to what the persona may touch", "The region to work in"],
+        "docs": "https://github.com/awslabs/mcp",
+    },
+    {
+        "id": "vercel",
+        "title": "Vercel",
+        "description": "Vercel's hosted server: projects, deployments and logs, through your own Vercel sign-in.",
+        "category": "Infrastructure",
+        "server_type": "hosted",
+        "transport": "http",
+        "command": None,
+        "url": "https://mcp.vercel.com",
+        "auth_type": "oauth2",
+        # No oauth_preset: Vercel's MCP endpoint registers clients dynamically
+        # (the RFC 8414 + dynamic-registration road the app already drives —
+        # intelligence/tests_oauth_dyn.py); presets stay for the famous three.
+        "needs": ["A Vercel account — the sign-in happens in your browser when you connect"],
+        "docs": "https://vercel.com/docs/mcp/vercel-mcp",
+    },
+    {
+        "id": "mermaid",
+        "title": "Diagrams & charts",
+        "description": "Generate and validate Mermaid diagrams — flowcharts, sequence diagrams, pies — which the chat already renders natively.",
+        "category": "Documents",
+        "server_type": "local",
+        "transport": "stdio",
+        "command": "npx -y mcp-mermaid",
+        "url": None,
+        "auth_type": "none",
+        "needs": ["Nothing — diagrams render right in the chat"],
+        "docs": "https://github.com/hustcc/mcp-mermaid",
+    },
 ]
 
-CATEGORIES = ["Software", "Data", "Communication", "Documents"]
+CATEGORIES = ["Software", "Data", "Communication", "Documents", "Infrastructure"]
 
 
 def catalog() -> list[dict]:

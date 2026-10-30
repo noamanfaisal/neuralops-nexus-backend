@@ -37,7 +37,8 @@ def make_persona(model: dict, *, system_prompt: str = "You are NeuralBot. PERSON
                  deep_models: list | None = None,
                  fallback_models: list | None = None, max_steps: int = 8,
                  utility_model: dict | None = None, persona_id: str = "p1",
-                 delegation_enabled: bool = False) -> dict:
+                 delegation_enabled: bool = False,
+                 other_servers: list | None = None) -> dict:
     """A PersonaInternal-shaped dict. Smart router: `deep_models` is the BENCH
     (today's nucleus always sends it); a lone `deep_model` mirrors into a
     one-item bench the way nucleus does, and the single field is kept as the
@@ -65,6 +66,9 @@ def make_persona(model: dict, *, system_prompt: str = "You are NeuralBot. PERSON
         "deep_model": deep_model or (bench[0] if bench else None),
         # item 46 (Layer 6, handoff change 14): the supervisor checkbox
         "delegation_enabled": delegation_enabled,
+        # MCP suggest-attach (option 2): the project's OTHER servers — names +
+        # one-liners only ([{name, description}]); prompt content, never tools.
+        "other_servers": other_servers or [],
     }
 
 
@@ -79,6 +83,7 @@ class FakeNucleus:
         self.pause_posts: list[dict] = []     # item 2: every pause POST (msg_id added)
         self.nudges: dict[str, list[str]] = {}  # W8: msg_id → waiting texts (taken once)
         self.personas: dict[str, dict] = {}   # item 46: extra personas by id (callees)
+        self.audit_posts: list[dict] = []     # 1.3.0: every POST to /ai-request-logs/
 
     def reset(self) -> None:
         self.persona = {}
@@ -90,6 +95,7 @@ class FakeNucleus:
         self.pause_posts.clear()
         self.nudges = {}
         self.personas = {}
+        self.audit_posts.clear()
 
     async def get_persona(self, request: Request) -> JSONResponse:
         # item 46: a callee persona is served by its id; the default persona
@@ -112,6 +118,11 @@ class FakeNucleus:
         self.usage_posts.append(body)
         return JSONResponse({"ok": True}, status_code=201)
 
+    async def post_audit(self, request: Request) -> JSONResponse:
+        # 1.3.0 audit: the legacy single-record endpoint, one POST per run
+        self.audit_posts.append(await request.json())
+        return JSONResponse({"ok": True}, status_code=201)
+
     async def get_nudges(self, request: Request) -> JSONResponse:
         # W8: taken ONCE — nucleus consumes on GET (legacy contract)
         msg_id = request.path_params["msg_id"]
@@ -132,6 +143,7 @@ def make_app(nucleus: FakeNucleus) -> Starlette:
         Route("/api/v1/internal/personas/{persona_id}/", nucleus.get_persona, methods=["GET"]),
         Route("/api/v1/internal/topics/{topic_id}/history/", nucleus.get_history, methods=["GET"]),
         Route("/api/v1/internal/usage/", nucleus.post_usage, methods=["POST"]),
+        Route("/api/v1/internal/ai-request-logs/", nucleus.post_audit, methods=["POST"]),
         Route("/api/v1/internal/messages/{msg_id}/pause/", nucleus.post_pause, methods=["POST"]),
         Route("/api/v1/internal/messages/{msg_id}/nudges/", nucleus.get_nudges, methods=["GET"]),
     ])

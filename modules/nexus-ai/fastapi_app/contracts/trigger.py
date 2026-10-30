@@ -164,6 +164,10 @@ class ToolResultData(BaseModel):
     # The page a web tool went to (web_fetch's url; a search's results page),
     # so the app can open it beside the chat.
     url: str | None = None
+    # File viewer part 2: the project-relative path a FILESYSTEM WRITE tool
+    # touched (write/edit/append/create) — nucleus collects these per reply and
+    # the app shows them as file chips. None for every other tool.
+    path: str | None = None
 
 
 class ApprovalRequestData(BaseModel):

@@ -79,10 +79,10 @@ def _resolve_topic(request, project_id: str, channel_id: str, topic_id: str):
 
 
 def _schedule_what(schedule) -> str:
-    """How a schedule's subject reads in a line: the persona, or the runbook it starts (W6)."""
+    """How a schedule's subject reads in a line: the persona, or the chain it starts (W6)."""
     if schedule.persona_id:
         return f"@{schedule.persona.name}"
-    return f"runbook {schedule.runbook.title}" if schedule.runbook_id else "a runbook"
+    return f"chain {schedule.runbook.title}" if schedule.runbook_id else "a chain"
 
 
 def _can_modify(user, schedule, topic) -> bool:
@@ -123,12 +123,12 @@ def create_schedule(
         raise HttpError(403, "You don't have permission to call personas in this topic.")
 
     if bool(payload.persona_id) == bool(payload.runbook_id):
-        raise HttpError(400, "A schedule runs a persona or starts a runbook -- one of the two.")
+        raise HttpError(400, "A schedule runs a persona or starts a chain -- one of the two.")
     persona = runbook = None
     if payload.runbook_id:
         # Starting a runbook on a clock is starting a runbook (W6).
         if not PermissionChecker.can(user, "runbook.run", obj=project):
-            raise HttpError(403, "You don't have permission to run runbooks in this project.")
+            raise HttpError(403, "You don't have permission to run chains in this project.")
         runbook = runbooks.get_runbook(project, payload.runbook_id)
         # Step 7 ruling 5 (owner): schedules stay simple — a chain that waits
         # for a person cannot run unattended on a clock.
@@ -137,7 +137,7 @@ def create_schedule(
         if runbook and not (runbook.steps or []):
             raise HttpError(400, "This chain has no steps yet — edit it and add its steps first.")
         if not runbook:
-            raise HttpError(404, "Runbook not found.")
+            raise HttpError(404, "Chain not found.")
     else:
         persona = intel_svc.get_persona(company, payload.persona_id)
         if not persona:
@@ -152,7 +152,7 @@ def create_schedule(
         raise HttpError(400, str(e))
 
     label = f" ({payload.label})" if payload.label else ""
-    what = f"@{persona.name}" if persona is not None else f"runbook {runbook.title}"
+    what = f"@{persona.name}" if persona is not None else f"chain {runbook.title}"
     _announce(
         company, project, topic,
         f"\U0001F4C5 Schedule created: {what}{label} — {result['schedule_summary']}",
@@ -230,8 +230,8 @@ def _runbook_project(request, project_id: str, right: str):
         raise HttpError(404, "Project not found.")
     if not PermissionChecker.can(user, right, obj=project):
         raise HttpError(403, {
-            "runbook.manage": "You don't have permission to define runbooks here.",
-            "runbook.run": "You don't have permission to run runbooks here.",
+            "runbook.manage": "You don't have permission to define chains here.",
+            "runbook.run": "You don't have permission to run chains here.",
         }.get(right, "You don't have access to this project."))
     return company, user, project
 
@@ -300,7 +300,7 @@ def patch_runbook(request, project_id: str, runbook_id: str, payload: RunbookPat
     except ValueError as e:
         raise HttpError(400, str(e))
     if not runbook:
-        raise HttpError(404, "Runbook not found.")
+        raise HttpError(404, "Chain not found.")
     return runbooks.serialise_runbook(runbook)
 
 
@@ -308,7 +308,7 @@ def patch_runbook(request, project_id: str, runbook_id: str, payload: RunbookPat
 def delete_runbook(request, project_id: str, runbook_id: str):
     _, _, project = _runbook_project(request, project_id, "runbook.manage")
     if not runbooks.delete_runbook(project, runbook_id):
-        raise HttpError(404, "Runbook not found.")
+        raise HttpError(404, "Chain not found.")
     return 204, None
 
 
@@ -320,13 +320,17 @@ def start_runbook(request, project_id: str, runbook_id: str, payload: RunbookSta
     company, user, project = _runbook_project(request, project_id, "runbook.run")
     runbook = runbooks.get_runbook(project, runbook_id)
     if not runbook:
-        raise HttpError(404, "Runbook not found.")
+        raise HttpError(404, "Chain not found.")
     # Step 7: the template a project is born with ships without steps — it is
     # there to edit, not to run.
     if not (runbook.steps or []):
         raise HttpError(400, "This chain has no steps yet — edit it and add its steps first.")
     if bool(payload.topic_id) == bool(payload.channel_id):
         raise HttpError(400, "Say where to run it: a topic, or a channel for a new one.")
+    # Chains v2 (ruling 3): the run's query — the task every step sees.
+    query = (payload.query or "").strip()
+    if len(query) > runbooks.QUERY_MAX:
+        raise HttpError(400, f"A chain's query is at most {runbooks.QUERY_MAX:,} characters.")
     if payload.topic_id:
         from authn.permissions.row_rules import visible_topic
 
@@ -343,7 +347,7 @@ def start_runbook(request, project_id: str, runbook_id: str, payload: RunbookSta
         topic = ws_svc.create_topic(company=company, project=project, channel=channel, title=title[:200], creator=user)
     if not PermissionChecker.can(user, "persona.mention", obj=topic):
         raise HttpError(403, "You don't have permission to call personas in this topic.")
-    run = runbooks.start_run(company, project, runbook, user, topic)
+    run = runbooks.start_run(company, project, runbook, user, topic, query=query)
     run_runbook.delay(str(run.id))
     return runbooks.serialise_run(runbooks.get_run(project, str(run.id)))
 

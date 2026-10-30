@@ -6,7 +6,7 @@ Two routers:
 """
 from typing import List, Optional
 
-from ninja import Router, Query, Schema
+from ninja import File as NinjaFile, Router, Query, Schema, UploadedFile
 from ninja.errors import HttpError
 
 from authn.auth import SupabaseBearer
@@ -25,6 +25,10 @@ from . import services as svc
 
 router = Router(tags=["Workspace"], auth=SupabaseBearer())
 members_router = Router(tags=["Members"], auth=SupabaseBearer())
+# File viewer part 2: the ONE public read path — a download by one-use ticket.
+# No auth= on purpose: the ticket in the path is the credential (minted below
+# by someone who passed the project read check, valid 60 s, one use).
+files_public_router = Router(tags=["Files"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -225,6 +229,75 @@ def list_project_files(request, project_id: str, path: str = Query(default="")):
     company, user, project = _resolve_project(request, project_id)
     try:
         return file_viewer.list_folder(project, path)
+    except file_viewer.FileViewerError as exc:
+        raise HttpError(exc.status, str(exc))
+
+
+class FileTicketIn(Schema):
+    path: str
+
+
+@router.post("/{project_id}/files/ticket/", response=dict)
+def make_file_ticket(request, project_id: str, payload: FileTicketIn):
+    """
+    Part 2: a one-use, 60-second download link for ONE file — {url, expires_in}.
+    For big files (the browser's own download manager streams them to disk,
+    instead of a blob held in memory) and for the chat's file chips. Minting
+    needs the same project read as every other file route; the GET itself is
+    public because the ticket is the proof.
+    """
+    company, user, project = _resolve_project(request, project_id)
+    try:
+        return file_viewer.make_download_ticket(project, payload.path)
+    except file_viewer.FileViewerError as exc:
+        raise HttpError(exc.status, str(exc))
+
+
+@files_public_router.get("/download/{token}")
+def download_with_ticket(request, token: str):
+    """
+    GET /api/v1/files/download/{token} — streams the ticket's file, exactly
+    once. Expired, already used or never-existed tickets all answer the same
+    410, on purpose: a guesser learns nothing. The file having vanished since
+    the mint is the one honest 404.
+    """
+    from nucleus.models import Project
+
+    payload = file_viewer.take_download_ticket(token)
+    if not payload:
+        raise HttpError(410, "This download link has expired or was already used — ask for a fresh one.")
+    project = Project.objects.filter(id=payload.get("project_id"), is_active=True).first()
+    if project is None:
+        raise HttpError(410, "This download link has expired or was already used — ask for a fresh one.")
+    try:
+        file_path, content_type = file_viewer.open_for_download(project, payload.get("path"))
+    except file_viewer.FileViewerError as exc:
+        raise HttpError(exc.status, str(exc))
+    return FileResponse(
+        open(file_path, "rb"), as_attachment=True,
+        filename=file_path.name, content_type=content_type,
+    )
+
+
+@router.post("/{project_id}/files/upload/", response=dict)
+def upload_project_file(request, project_id: str,
+                        file: UploadedFile = NinjaFile(...),
+                        path: str = Query(default=""),
+                        overwrite: bool = Query(default=False)):
+    """
+    Part 3: upload ONE file (multipart field `file`) into the project folder
+    at ?path=<folder>. Needs project.files_write (admins and members by
+    default; viewers can't). Name rules, the folder wall, the size cap and
+    the overwrite flag live in workspace/files.save_upload. NOTE: the 64 KB
+    body wall that bit the pause-save does not apply here — Django's
+    DATA_UPLOAD cap never counts multipart FILE parts; nginx's
+    client_max_body_size (50m) is the outer limit.
+    """
+    company, user, project = _resolve_project(request, project_id)
+    if not PermissionChecker.can(user, "project.files_write", obj=project):
+        raise HttpError(403, "You don't have permission to upload files to this project.")
+    try:
+        return file_viewer.save_upload(project, path, file.name, file, overwrite=overwrite)
     except file_viewer.FileViewerError as exc:
         raise HttpError(exc.status, str(exc))
 

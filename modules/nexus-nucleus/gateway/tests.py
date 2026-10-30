@@ -97,8 +97,13 @@ class McpDoorTests(GatewayFixture):
         self.assertEqual(result["protocolVersion"], "2025-06-18")
         r = self.mcp(token, "tools/list")
         names = [t["name"] for t in r.json()["result"]["tools"]]
-        self.assertEqual(sorted(names), ["ask_persona", "chain_status", "list_chains", "list_projects", "list_topics",
-                                         "post_message", "run_chain", "search_memory"])
+        # The five originals + chains + the 1.4.0 admin tools (owner's list).
+        self.assertEqual(sorted(names), [
+            "ask_persona", "chain_status", "create_model", "create_persona", "create_topic",
+            "get_topic_messages", "list_chains", "list_models", "list_personas", "list_projects",
+            "list_topics", "list_users", "post_message", "run_chain", "search_memory",
+            "update_model", "update_persona", "update_topic",
+        ])
         is_error, projects = self.tool(token, "list_projects")
         self.assertFalse(is_error, projects)
         self.assertIn("Alpha", [p["name"] for p in projects])
@@ -215,3 +220,166 @@ class GatewayToolTests(GatewayFixture):
         self.assertFalse(is_error, hits)
         self.assertEqual([h["message_id"] for h in hits], [msg["id"]])
         self.assertIn("pgbouncer", hits[0]["preview"])
+
+
+class AdminGatewayToolTests(GatewayFixture):
+    """1.4.0 setup copilot — the owner's admin tools on the SAME door: each one
+    is the dialog's own road (same services, same rights, as the calling
+    person), create/update_model run the provider check first, and an api_key
+    only ever TRAVELS — no result and no log carries it back."""
+
+    def check_worker(self, body=None):
+        """The engine's model-check endpoint, faked — ModelCheckTests' pattern."""
+        from unittest.mock import MagicMock
+        response = MagicMock(status_code=200)
+        response.json.return_value = body or {"ok": True, "latency_ms": 321}
+        response.raise_for_status.return_value = None
+        return patch("intelligence.services.httpx.post", return_value=response)
+
+    def test_create_model_checks_first_and_never_leaks_the_key(self):
+        from nucleus.models import ModelConfig
+        token = self.token_for(self.owner)
+        args = {"name": "Groq fast", "provider": "openai_compatible",
+                "model_id": "llama-3.3-70b-versatile", "api_base": "https://api.groq.com/openai/v1",
+                "api_key": "gsk-test-not-real", "accept_provider_terms": True}
+
+        # No terms → refused before anything runs; the person must agree first.
+        with self.check_worker() as post, self.settings(NEXUS_AI_URL="http://worker.test", INTERNAL_API_KEY="ik"):
+            is_error, text = self.tool(token, "create_model", {**args, "accept_provider_terms": False})
+            self.assertTrue(is_error)
+            self.assertIn("terms", text)
+            post.assert_not_called()
+
+            # A failing provider check refuses the save — nothing lands.
+            with self.check_worker({"ok": False, "error_code": "model_failure", "status_code": 401,
+                                    "error": "bad key"}), \
+                 self.settings(NEXUS_AI_URL="http://worker.test", INTERNAL_API_KEY="ik"):
+                is_error, text = self.tool(token, "create_model", args)
+            self.assertTrue(is_error)
+            self.assertFalse(ModelConfig.objects.filter(name="Groq fast").exists())
+
+            # A passing check saves — and the result carries has_api_key, never the key.
+            is_error, out = self.tool(token, "create_model", args)
+        self.assertFalse(is_error, out)
+        self.assertEqual((out["name"], out["provider"], out["checked"]), ("Groq fast", "openai_compatible", True))
+        self.assertTrue(out["has_api_key"])
+        self.assertNotIn("api_key", out)
+        self.assertNotIn("gsk-test-not-real", json.dumps(out))
+        row = ModelConfig.objects.get(name="Groq fast")
+        self.assertEqual(row.get_api_key(), "gsk-test-not-real")
+        self.assertTrue(row.licence_accepted)
+
+        # A Member holds no model_config.create — same wall as the dialog.
+        with self.check_worker(), self.settings(NEXUS_AI_URL="http://worker.test", INTERNAL_API_KEY="ik"):
+            is_error, text = self.tool(self.token_for(self.sara), "create_model", args)
+        self.assertTrue(is_error)
+        self.assertIn("permission", text)
+
+    def test_update_model_rechecks_only_reach_changes(self):
+        token = self.token_for(self.owner)
+        self.model_config.set_api_key("sk-stored")
+        self.model_config.save(update_fields=["api_key_encrypted"])
+
+        # A rename is not a reach change — no provider call at all.
+        with self.check_worker() as post, self.settings(NEXUS_AI_URL="http://worker.test", INTERNAL_API_KEY="ik"):
+            is_error, out = self.tool(token, "update_model",
+                                      {"config_id": str(self.model_config.id), "name": "GPT Renamed"})
+            self.assertFalse(is_error, out)
+            self.assertEqual((out["name"], out["checked"]), ("GPT Renamed", False))
+            post.assert_not_called()
+
+            # A new model id IS — the check runs with the STORED key (config_id road).
+            is_error, out = self.tool(token, "update_model",
+                                      {"config_id": str(self.model_config.id), "model_id": "gpt-next"})
+            self.assertFalse(is_error, out)
+            self.assertEqual((out["model_id"], out["checked"]), ("gpt-next", True))
+            self.assertEqual(post.call_args.kwargs["json"]["api_key"], "sk-stored")
+        self.assertNotIn("api_key", out)
+
+    def test_persona_tools_follow_the_projects_rights(self):
+        from nucleus.models import Persona
+        # A Member cannot create personas — the dialog's wall holds here too.
+        with patch("chat.services.publish_async", new_callable=AsyncMock):
+            is_error, text = self.tool(self.token_for(self.sara), "create_persona", {
+                "project_id": str(self.p1.id), "name": "Helper",
+                "system_prompt": "You help.", "model_config_id": str(self.model_config.id)})
+        self.assertTrue(is_error)
+        self.assertIn("permission", text)
+
+        token = self.token_for(self.owner)
+        is_error, out = self.tool(token, "create_persona", {
+            "project_id": str(self.p1.id), "name": "Helper",
+            "system_prompt": "You help people set things up.",
+            "model_config_id": str(self.model_config.id), "output_type": "auto"})
+        self.assertFalse(is_error, out)
+        self.assertEqual((out["name"], out["mention"], out["model"]), ("Helper", "@Helper", "GPT Test"))
+        row = Persona.objects.get(name="Helper")
+        self.assertEqual(row.prompt.system_prompt, "You help people set things up.")
+
+        # update: prompt + name ride the same patch road; a Member is refused.
+        is_error, out = self.tool(token, "update_persona", {
+            "persona_id": str(row.id), "name": "Guide", "system_prompt": "You guide."})
+        self.assertFalse(is_error, out)
+        self.assertEqual(out["name"], "Guide")
+        row.refresh_from_db()
+        self.assertEqual((row.name, row.prompt.system_prompt), ("Guide", "You guide."))
+        is_error, text = self.tool(self.token_for(self.sara), "update_persona",
+                                   {"persona_id": str(row.id), "name": "Mine"})
+        self.assertTrue(is_error)
+
+        # list: the summary names the composition, never internals.
+        is_error, rows = self.tool(token, "list_personas", {"project_id": str(self.p1.id)})
+        self.assertFalse(is_error, rows)
+        self.assertIn("Guide", [p["name"] for p in rows])
+
+    def test_users_and_topic_tools_run_the_apps_roads(self):
+        from django.db.models import Max
+        token_sara = self.token_for(self.sara)
+        token_owner = self.token_for(self.owner)
+
+        # list_users: any member — the Members page's own rule.
+        is_error, rows = self.tool(token_sara, "list_users")
+        self.assertFalse(is_error, rows)
+        self.assertIn(self.owner.email, [r["email"] for r in rows])
+
+        # create_topic: a Member may (topic.create); a Viewer may not.
+        is_error, out = self.tool(token_sara, "create_topic",
+                                  {"channel_id": str(self.c1.id), "title": "Planning"})
+        self.assertFalse(is_error, out)
+        topic_id = out["id"]
+        is_error, text = self.tool(self.token_for(self.vera), "create_topic",
+                                   {"channel_id": str(self.c1.id), "title": "Nope"})
+        self.assertTrue(is_error)
+
+        # get_topic_messages: the transcript, with the AI-only filter.
+        seq = (ChatMessage.objects.filter(topic_id=topic_id).aggregate(Max("sequence"))["sequence__max"] or 0)
+        ChatMessage.objects.create(company=self.company, project=self.p1, topic_id=topic_id,
+                                   sender=self.sara, content="what is our plan?", sequence=seq + 1)
+        ChatMessage.objects.create(company=self.company, project=self.p1, topic_id=topic_id,
+                                   sender=self.persona_sara.identity_user, content="Ship it.",
+                                   sequence=seq + 2,
+                                   metadata={"persona_id": str(self.persona_sara.id), "persona_name": "Sara"})
+        is_error, rows = self.tool(token_sara, "get_topic_messages", {"topic_id": topic_id})
+        self.assertFalse(is_error, rows)
+        self.assertEqual([(r["content"], r["ai"]) for r in rows],
+                         [("what is our plan?", False), ("Ship it.", True)])
+        is_error, rows = self.tool(token_sara, "get_topic_messages",
+                                   {"topic_id": topic_id, "ai_only": True})
+        self.assertEqual([r["content"] for r in rows], ["Ship it."])
+        self.assertEqual(rows[0]["author"], "Sara")
+
+        # update_topic: rename is Member-tier; archive/restore is Admin-tier.
+        is_error, out = self.tool(token_sara, "update_topic",
+                                  {"topic_id": topic_id, "title": "Planning Q4"})
+        self.assertFalse(is_error, out)
+        self.assertEqual(out["title"], "Planning Q4")
+        is_error, text = self.tool(token_sara, "update_topic", {"topic_id": topic_id, "archive": True})
+        self.assertTrue(is_error)  # a Member holds no topic.archive
+        is_error, out = self.tool(token_owner, "update_topic", {"topic_id": topic_id, "archive": True})
+        self.assertFalse(is_error, out)
+        self.assertTrue(out["archived"])
+        is_error, out = self.tool(token_owner, "update_topic", {"topic_id": topic_id, "archive": False})
+        self.assertFalse(is_error, out)
+        self.assertFalse(out["archived"])
+        from nucleus.models import ChatTopic
+        self.assertTrue(ChatTopic.objects.get(id=topic_id).is_active)

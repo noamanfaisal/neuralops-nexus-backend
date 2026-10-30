@@ -81,6 +81,12 @@ class PersonaSpec:
     # Item 46 (Layer 6): nucleus's supervisor checkbox — this persona may run
     # other personas through call_persona (handoff change 14).
     delegation_enabled: bool = False
+    # MCP suggest-attach (owner's "option 2", 2026-10-22): the project's OTHER
+    # external servers as (name, one_line) pairs — PROMPT CONTENT only. Never
+    # dialled, never a tool, never a schema: the persona may point at the
+    # wall ("this project has X; ask someone with edit rights to attach it"),
+    # never climb it.
+    other_servers: tuple[tuple[str, str], ...] = ()
 
     def model_for(self, role: ModelRole) -> ModelSpec:
         """The persona's first model with this role; raises if it has none."""

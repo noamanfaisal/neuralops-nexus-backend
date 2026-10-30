@@ -38,8 +38,9 @@ Expect: both sign-in roads work; the local one does not need the portal.
 Expect: app shows **1.0.0**; no "server too old" warning anywhere.
 
 **T-04 — The pane rail.** Open any topic. The right-side rail must offer
-exactly four panes: **Topics, Context, Schedules, Project** — each opens.
-There is no Recall pane and no Deliverables pane (removed in 1.0.0).
+exactly five panes: **Topics, Context, Schedules, Project, Files** — each
+opens. There is no Recall pane and no Deliverables pane (removed in 1.0.0).
+(Files joined on 2026-10-29; on an older guide this said four.)
 
 ## 2. Workspace: projects, channels, topics
 
@@ -239,9 +240,58 @@ raw transcript form is banned.
 ## 12. Project files
 
 **T-44 — Files pane.** Have a persona write a small file ("save a file
-notes.md with three lines"). Open the Project pane.
-Expect: the file is listed; it downloads; markdown/code/images render in
-the viewer; the raw view is sandboxed and size-capped.
+notes.md with three lines"). Open the **Files** pane from the rail.
+Expect: the file is listed with its size and age (Refresh if it was written
+after the pane opened); clicking it renders markdown/code/images in a
+sandboxed viewer; too-big or binary files say so and offer Download instead;
+the Download button saves the file; folders open with a breadcrumb trail
+back. A brand-new project with no folder yet says exactly that.
+
+**T-44b — File chips in chat (1.1.0).** Have a persona WRITE a file in a
+reply ("save a file notes.md with three lines"). When the reply finishes,
+expect a small chip under the bubble: the file's name and size, a **View**
+button (the Files pane opens at that file's folder) and a **Download**
+button (the browser downloads it straight away). The chip appears only for
+files the reply actually wrote — a reply that only READ files gets none.
+A download link is never pasted into the message text; if you copy a
+download's address and open it a second time, it must refuse ("expired or
+already used").
+
+**T-44c — Upload (1.1.0).** In the Files pane, use the **Upload** button (or
+drag a file onto the list) as an admin or member. Expect: a progress bar,
+the file in the list without a manual refresh, and — when a file with that
+name already exists — a "Replace this file?" question before anything is
+overwritten. Files land in the folder you are LOOKING AT. A viewer sees no
+Upload button at all and drag-and-drop does nothing for them. A file over
+50 MB is refused with a worded message.
+
+**T-44d — AI audit log (1.3.0).** As an ADMIN, hover any persona reply and
+click the magnifier ("How this reply was built"), or open the Context pane
+and use "How replies here are built" for the whole chat. Expect: one card
+per model run (a router hand-over shows two — the router's marked
+`escalated`, the deep run `done`), each unfolding to the exact ingredients
+the prompt was built from — the persona's system prompt, the project brief,
+the tool catalog, retrieved project memory with scores, how many history
+messages rode along, the message it answered — plus the raw model response,
+tokens in/out and latency. As a MEMBER: neither button exists, and calling
+the API directly answers 403 (this log shows everyone's prompts — it is
+Admin-tier on purpose). A reply that FAILED still shows a card (status
+`failed`, the error, the prompt that was sent).
+
+**T-44e — Gateway admin tools (1.4.0).** From Claude Desktop / Cursor
+connected with your gateway token (the same setup as the earlier gateway
+case), ask it to list the server's tools. Expect **18**, now including
+list_models, create_model, update_model, list_personas, create_persona,
+update_persona, list_users, get_topic_messages, create_topic, update_topic.
+Try: "register a model on my NeuralOps" — expect it to ask you to accept the
+provider's terms, CHECK the model with the provider first (a bad key is
+refused with a reason and nothing is saved), and the result never contains
+the key (has_api_key only). "Create a persona called Scout on that model" →
+appears under /list-personas in the app. "Show me the last 10 AI replies in
+<topic>" → the transcript, AI rows only when asked. With a MEMBER's token:
+registering a model or creating a persona is refused in words; renaming a
+topic works; archiving one is refused. Everything acts AS the token's
+person — nothing here outruns the app's own rights.
 
 ## 13. Usage and costs
 
@@ -262,14 +312,43 @@ rejected.
 
 ## Known at 1.0.0 (do not file as bugs)
 
-- Chains are labeled **"Runbook"** in the UI; the rename to "Chain" ships
-  in 1.1.0. There is no `@ChainName` invocation yet — chains run from the
-  ▶ button or a schedule.
-- No connector tiles with icons yet; MCPs are added via `/add-mcp` or the
-  catalog list (tiles ship in 1.2.0).
+- ~~Chains are labeled "Runbook" in the UI~~ **Shipped in 1.1.0 (Chains v2):**
+  the UI says **Chain** everywhere (tab, banners, dialogs; `/add-chain` and
+  `/list-chains` work, the old `/add-runbook` names still do). New powers to
+  test on a 1.1.0 server:
+  - **Query at run time:** the Run dialog asks "What is this run about?" —
+    the text rides every step as the chain's task; the start line in the
+    chat shows `Task: …`. A chain SCHEDULE has the same optional box.
+  - **`@ChainName query` in chat:** a project admin/owner can type
+    `@WeeklyOpsUpdate the May numbers` (title with spaces/case ignored) —
+    the chain starts in that chat with the rest of the message as its task.
+    A member gets a worded refusal and keeps the ▶ Run button.
+  - **Model steps:** a chain step can be a bare MODEL + prompt (no tools, no
+    approvals — a cheap text transform). Its reply posts under the chain's
+    own name with a "chain" pill, and bills as a chat reply with no persona.
+  - **Role labels:** a step can carry a label ("Reviewer") — banners and the
+    message chips read "step 2 of 4 — Reviewer".
+  - The editor warns when the supervisor is also one of the steps.
+- ~~No connector tiles with icons yet~~ **Shipped in 1.2.0:** the tool
+  catalog's tiles now also cover Bitbucket, Neo4j (graph), AWS, Vercel and
+  Diagrams & charts (Mermaid), each with its product mark (AWS wears a
+  neutral cloud glyph — its mark isn't licensable). Picking a tile pre-fills
+  the add-MCP dialog; you still bring the token/credentials it names.
+  These five are freshly catalogued — if one's install command fails on a
+  real service, report it as a catalog bug, not a server bug.
 - Personas cannot register models or set up the system (the setup copilot
-  ships later); `/add-model` and the dialogs are the only path.
-- Free-model preset tiles are not in yet (1.2.0).
+  ships later); `/add-model` and the dialogs are the only path. The persona
+  catalogue's **Guide** persona walks a new user to a free key — it guides
+  and refuses keys in chat; the Register dialog stays where keys go.
+- ~~Free-model preset tiles are not in yet~~ **Shipped in 1.2.0:** the
+  Register dialog opens with **"Free to start"** tiles (GitHub Models,
+  Gemini, Groq, OpenRouter :free, Mistral, Cerebras, Ollama). A tile
+  pre-fills everything except the key, links the provider's key page, and
+  states the rate-limit and data-training notes plainly. Ollama is the
+  keyless, private option. Expect: tile → paste key → Check → Register,
+  with zero typing of URLs or model ids. These presets are freshly
+  catalogued — a tile whose endpoint or model id a provider has since moved
+  is a catalog bug; report it with the provider's current page.
 
 ## Reporting
 

@@ -165,6 +165,7 @@ def update_ai_message(
     used_tools: list[str] | None = None,
     retrieved_sources: list | None = None,
     embed_description: str | None = None,
+    files: list | None = None,
 ) -> None:
     """Update the AI message content and mark COMPLETED. `stopped`: the reader ended it; content is partial."""
     from nucleus.models import ChatMessage
@@ -200,6 +201,10 @@ def update_ai_message(
         metadata["retrieved_sources"] = list(retrieved_sources)
     if embed_description:
         metadata["embed_description"] = embed_description
+    # File viewer part 2: the files this reply WROTE ({path, name, size}) —
+    # the app shows them as chips under the bubble.
+    if files:
+        metadata["files"] = list(files)
 
     ChatMessage.objects.filter(id=message_id).update(
         content=content,
@@ -248,6 +253,9 @@ def remember_tool_call(trail: list, event: dict) -> None:
         "error": result.get("error"),
         # The page a web tool went to -- the app opens it beside the chat (W9).
         "url": result.get("url"),
+        # File viewer part 2: the file a write tool touched -- the relay turns
+        # these into the reply's file chips.
+        "path": result.get("path"),
     })
     del trail[:-ACTIVITY_TRAIL_MAX]
 
@@ -391,8 +399,10 @@ def build_context_sources(topic, company, persona=None) -> list[dict]:
 def serialise(msg) -> dict:
     metadata = msg.metadata or {}
     # For AI persona messages, use the stored persona_name rather than the
-    # shadow user's auto-generated username (e.g. "user_28").
-    if msg.sender and metadata.get("persona_name"):
+    # shadow user's auto-generated username (e.g. "user_28"). A chain's MODEL
+    # step (Chains v2) has NO sender at all — the chain itself speaks, and its
+    # title rides the same field.
+    if metadata.get("persona_name"):
         sender_name = metadata["persona_name"]
     elif msg.sender:
         sender_name = msg.sender.get_display_name()
@@ -426,6 +436,8 @@ def serialise(msg) -> dict:
         "triggered_by_id": metadata.get("triggered_by_id"),
         "triggered_by_name": metadata.get("triggered_by_name"),
         "runbook_run": metadata.get("runbook_run"),
+        # File viewer part 2: the files this reply wrote — chips under the bubble.
+        "files": metadata.get("files") or [],
         "sequence": msg.sequence,
         "created_at": msg.created_at.isoformat(),
     }

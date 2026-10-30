@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import replace as dc_replace
 from datetime import datetime, timezone
 
@@ -70,6 +71,12 @@ from fastapi_app.contracts.trigger import AgentEvent, ResumeBlock
 
 log = logging.getLogger(__name__)
 
+# 1.3.0 AI audit log: the anatomy keeps FULL section/response text up to this
+# cap per field — enough to read a whole system prompt, bounded so one giant
+# retrieval dump can't bloat the nucleus row.
+AUDIT_TEXT_CAP = 20_000
+AUDIT_ERROR_CAP = 500
+
 
 class ReplyGenerator:
     def __init__(self, agents: AgentBuilder, converter: MessageConverter, usage: UsageReader,
@@ -87,6 +94,9 @@ class ReplyGenerator:
         self._used_tools: list[str] = []
         self._tool_outputs: list[dict] = []  # item 27: fed to the memory pass
         self._fallback: ModelSpec | None = None  # item 12: who answered, when not the seat's own
+        # 1.3.0 audit: one dict per model RUN (a fallback or hand-over adds
+        # another), accumulated across this reply's runs like _records.
+        self._audits: list[dict] = []
 
     async def generate(self, request: ReplyRequest, capabilities: list | None = None,
                        resume: ResumeBlock | None = None, catalog_hash: str = "",
@@ -127,12 +137,17 @@ class ReplyGenerator:
             plan = self._fitter.fit(plan, budget)
 
         instructions = self._converter.instructions(plan)
+        # 1.3.0 audit: anything appended BEYOND the plan's sections is recorded
+        # separately, so the log shows the router bench / hand-over note as its
+        # own ingredient instead of vanishing into "instructions".
+        extra_instructions = ""
         if allow_escalation:
             # Smart router: with a bench of 2+ deep models the instructions
             # list them with their strengths, so the run can NAME its pick.
-            instructions += router_instructions(persona.models_for(ModelRole.DEEP))
+            extra_instructions += router_instructions(persona.models_for(ModelRole.DEEP))
         if handover is not None:
-            instructions += handover_suffix(handover)
+            extra_instructions += handover_suffix(handover)
+        instructions += extra_instructions
 
         if resume is not None:
             history = list(ModelMessagesTypeAdapter.validate_json(resume.state))
@@ -155,6 +170,26 @@ class ReplyGenerator:
         base: UsageRecord | None = None
         result = None
         for index, candidate in enumerate(candidates):
+            started = time.monotonic()
+            # 1.3.0 audit: the prompt anatomy AS THIS RUN SENT IT — the plan's
+            # sections post-fit (what instructions= was built from), the extra
+            # instructions, the converted history count and the user message.
+            audit = {
+                "role": request.role.value,
+                "provider": candidate.provider,
+                "model_id": candidate.model_id,
+                "model_name": candidate.name,
+                "resume": resume is not None,
+                "fallback_attempt": index,
+                "sections": [
+                    {"kind": s.kind, "chars": len(s.text), "text": s.text[:AUDIT_TEXT_CAP]}
+                    for s in plan.instructions
+                ],
+                "extra_instructions": extra_instructions[:AUDIT_TEXT_CAP],
+                "history_count": len(history),
+                "message": (prompt or "")[:AUDIT_TEXT_CAP],
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
             agent = self._agents.build(persona, request.role, instructions,
                                        escalate=allow_escalation, spec=candidate)
             mapper = EventMapper(
@@ -193,11 +228,21 @@ class ReplyGenerator:
                 self._records.append(self._usage.read(None, request_messages, mapper.text(), True, base))
                 self._used_tools.extend(t for t in mapper.used_tools if t not in self._used_tools)
                 self._tool_outputs.extend(mapper.tool_outputs)
+                rec = self._records[-1]
+                self._audits.append({**audit, "status": "cancelled", "error": None,
+                                     "response": mapper.text()[:AUDIT_TEXT_CAP],
+                                     "prompt_tokens": rec.input_tokens, "completion_tokens": rec.output_tokens,
+                                     "latency_ms": int((time.monotonic() - started) * 1000)})
                 raise
-            except Exception:
+            except Exception as exc:
                 self._records.append(self._usage.read(None, request_messages, mapper.text(), False, base))
                 self._used_tools.extend(t for t in mapper.used_tools if t not in self._used_tools)
                 self._tool_outputs.extend(mapper.tool_outputs)
+                rec = self._records[-1]
+                self._audits.append({**audit, "status": "failed", "error": str(exc)[:AUDIT_ERROR_CAP],
+                                     "response": mapper.text()[:AUDIT_TEXT_CAP],
+                                     "prompt_tokens": rec.input_tokens, "completion_tokens": rec.output_tokens,
+                                     "latency_ms": int((time.monotonic() - started) * 1000)})
                 # item 12: retry on the next candidate ONLY while the reader has
                 # seen nothing — never switch voices mid-reply.
                 if mapper.text() == "" and index < len(candidates) - 1:
@@ -205,6 +250,9 @@ class ReplyGenerator:
                                 candidate.model_id, candidates[index + 1].model_id)
                     continue
                 raise
+            self._audits.append({**audit, "status": "done", "error": None,
+                                 "response": mapper.text()[:AUDIT_TEXT_CAP],
+                                 "latency_ms": int((time.monotonic() - started) * 1000)})
             if index > 0:
                 self._fallback = candidate
             break
@@ -220,11 +268,19 @@ class ReplyGenerator:
             self._records.append(self._usage.read(None, request_messages, mapper.text(), False, base))
         self._used_tools.extend(t for t in mapper.used_tools if t not in self._used_tools)
         self._tool_outputs.extend(mapper.tool_outputs)
+        if self._audits:
+            # 1.3.0 audit: the finished run's token totals (the records for
+            # THIS run start at _last_run_start — set per candidate above).
+            run_records = self._records[self._last_run_start:]
+            self._audits[-1]["prompt_tokens"] = sum(r.input_tokens for r in run_records)
+            self._audits[-1]["completion_tokens"] = sum(r.output_tokens for r in run_records)
 
         # Items 13/46: a run that produced an Escalate hands the reply over.
         output = result.output if result else None
         if isinstance(output, Escalate):
             self._escalation = output
+            if self._audits:  # 1.3.0 audit: the run's real ending
+                self._audits[-1]["status"] = "escalated"
             return
 
         # Item 2: a run that produced DeferredToolRequests is PAUSED, not done.
@@ -255,6 +311,8 @@ class ReplyGenerator:
                 pending=tuple(pending),
                 catalog_hash=catalog_hash,
             )
+            if self._audits:  # 1.3.0 audit: the run's real ending
+                self._audits[-1]["status"] = "paused"
 
     def usage_records(self) -> list[UsageRecord]:
         """One per model call, ACCUMULATED across this reply's runs (items
@@ -283,6 +341,13 @@ class ReplyGenerator:
         """The reply's full tool outputs (capped per output) — item 27's
         memory pass reviews these after message_done."""
         return list(self._tool_outputs)
+
+    def audits(self) -> list[dict]:
+        """1.3.0 AI audit log: one dict per model RUN of this reply — the
+        prompt anatomy (sections post-fit, extra instructions, history count,
+        message) plus the outcome (status/response/error/latency). Accumulates
+        across runs like usage_records(); available after any ending."""
+        return [dict(a) for a in self._audits]
 
     def fallback_used(self) -> ModelSpec | None:
         """The fallback model that answered, or None when the seat's own did

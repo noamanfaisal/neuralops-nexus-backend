@@ -173,6 +173,19 @@ class NexusAIClient:
         resp.raise_for_status()
         return resp.json()
 
+    def transform(self, payload: dict, timeout: float = 180.0) -> dict:
+        """POST /models/transform/ (Chains v2, ruling 2) — one bare model call
+        for a chain's "model" step: prompt in, {ok, text, usage, …} out. The
+        engine's answer is returned as-is (ok=False carries its worded error);
+        raises RuntimeError only when the engine itself cannot be reached."""
+        if not self.configured:
+            raise RuntimeError("NEXUS_AI_URL not configured")
+        resp = httpx.post(f"{self.base_url}/api/v1/models/transform/", json=payload,
+                          headers=self._headers, timeout=timeout)
+        if resp.status_code != 200:
+            raise RuntimeError(f"nexus-ai /models/transform/ returned {resp.status_code}: {resp.text[:300]}")
+        return resp.json()
+
     def list_mcp_tools(self, url: str, bearer_token: str | None = None) -> tuple[bool, list | str]:
         """POST /mcp/tools/ (Step 6, change 6) — the engine dials an MCP server
         and lists its tools [{name, one_line, read_only}]. (True, tools) or

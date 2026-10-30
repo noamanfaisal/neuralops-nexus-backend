@@ -799,9 +799,11 @@ class RelayActivityTrailTests(RelayFixture):
         self.assertEqual([(e["tool"], e["ok"], e["duration_ms"]) for e in ends], [("web_search", True, 100), ("shell", False, 30)])
         self.assertEqual(ends[1]["error"], "command not allowed")
         row = (await sync_to_async(self.reply_rows)())[0]
+        # `path` joined the trail rows with the file chips (file viewer part 2:
+        # a write tool's confirmed path) — None on calls that wrote nothing.
         self.assertEqual(row.metadata["activity_trail"], [
-            {"tool": "web_search", "ok": True, "duration_ms": 100, "preview": "Canada GDP …", "error": None, "url": None},
-            {"tool": "shell", "ok": False, "duration_ms": 30, "preview": None, "error": "command not allowed", "url": None},
+            {"tool": "web_search", "ok": True, "duration_ms": 100, "preview": "Canada GDP …", "error": None, "url": None, "path": None},
+            {"tool": "shell", "ok": False, "duration_ms": 30, "preview": None, "error": "command not allowed", "url": None, "path": None},
         ])
         # and the start events still drive the activity label as before
         self.assertEqual([e["tool"] for e in self.events("tool_activity")], ["web_search", "shell"])

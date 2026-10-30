@@ -238,9 +238,10 @@ async def list_chains(user, project_id: str) -> list[dict]:
     return await sync_to_async(_run)()
 
 
-async def run_chain(user, chain_id: str, topic_id: str) -> dict:
+async def run_chain(user, chain_id: str, topic_id: str, query: str = "") -> dict:
     """Start a chain in a topic — exactly the app's start road: runbook.run +
-    persona.mention, the caller is the starter and the actor of every step."""
+    persona.mention, the caller is the starter and the actor of every step.
+    Chains v2 (ruling 3): `query` is the run's task — every step sees it."""
     def _run():
         from authn.permissions.checker import PermissionChecker
         from scheduling import runbooks
@@ -252,14 +253,397 @@ async def run_chain(user, chain_id: str, topic_id: str) -> dict:
             raise GatewayToolError("No such chain in that topic's project.")
         if not (runbook.steps or []):
             raise GatewayToolError("This chain has no steps yet — edit it in the app first.")
+        if len((query or "").strip()) > runbooks.QUERY_MAX:
+            raise GatewayToolError(f"A chain's query is at most {runbooks.QUERY_MAX:,} characters.")
         if not PermissionChecker.can(user, "runbook.run", obj=project):
             raise GatewayToolError("You can't run chains in this project.")
         if not PermissionChecker.can(user, "persona.mention", obj=topic):
             raise GatewayToolError("You can't call personas in this topic.")
-        run = runbooks.start_run(company, project, runbook, user, topic)
+        run = runbooks.start_run(company, project, runbook, user, topic, query=(query or "").strip())
         run_runbook.delay(str(run.id))
         return {"run_id": str(run.id), "status": "queued", "topic_id": topic_id,
                 "note": "The chain runs in the topic; chain_status follows it."}
+    return await sync_to_async(_run)()
+
+
+# ── admin tools (1.4.0 setup copilot — the owner's list, ruled 2026-10-22
+#    19:27). Same doctrine as everything above: a thin front door over the
+#    EXACT roads the dialogs use — same services, same rights, checked as the
+#    calling person; never a master user, never new business logic.
+#    An api_key travels ONLY as a tool argument: it is never echoed back in a
+#    result (results carry has_api_key, like the REST API) and tool arguments
+#    are never logged. create_model/update_model run the dialogs' pre-save
+#    provider check; a model that cannot answer is refused, not saved. ──────
+
+def _model_summary(config, utility_id: str | None = None) -> dict:
+    """A model row WITHOUT its key — has_api_key only, like ModelConfigOut."""
+    return {
+        "id": str(config.id), "name": config.name, "provider": config.provider,
+        "model_id": config.model_id, "qualified_id": config.qualified_id,
+        "api_base": config.api_base, "context_window": config.context_window,
+        "max_output_tokens": config.max_output_tokens, "temperature": config.temperature,
+        "routing_notes": config.routing_notes or "",
+        "supports_tools": config.supports_tools,
+        "has_api_key": bool(config.api_key_encrypted),
+        "is_utility": str(config.id) == (utility_id or ""),
+        "project_ids": [str(pid) for pid in config.projects.filter(is_active=True).values_list("id", flat=True)],
+    }
+
+
+def _run_model_check(company, provider: str, model_id: str,
+                     api_key: str | None, api_base: str | None,
+                     config_id: str | None = None) -> dict:
+    """The dialogs' pre-save provider check, verbatim: ok → latency; a model
+    that cannot answer, a bad id, or a missing worker all REFUSE the save."""
+    from intelligence import services as intel_svc
+
+    try:
+        res = intel_svc.check_model_config(company, {
+            "provider": provider, "model_id": model_id,
+            "api_key": api_key or None, "api_base": api_base or None,
+            "config_id": config_id,
+        })
+    except ValueError as exc:
+        raise GatewayToolError(str(exc))
+    except intel_svc.WorkerUnavailable as exc:
+        raise GatewayToolError(f"The model could not be checked — {exc} Nothing was saved.")
+    data = res if isinstance(res, dict) else res.dict()
+    if not data.get("ok"):
+        raise GatewayToolError(data.get("reason") or "The model could not be used — nothing was saved.")
+    return data
+
+
+async def list_models(user) -> list[dict]:
+    """Every model config this person's road shows — never a key."""
+    def _run():
+        from intelligence import services as intel_svc
+
+        company = _company()
+        utility = intel_svc.utility_model_of(company)
+        utility_id = str(utility.id) if utility else None
+        return [_model_summary(m, utility_id) for m in intel_svc.list_model_configs(company, user)]
+    return await sync_to_async(_run)()
+
+
+async def create_model(user, name: str, provider: str, model_id: str,
+                       accept_provider_terms: bool = False,
+                       api_key: str = "", api_base: str = "",
+                       context_window: int | None = None,
+                       max_output_tokens: int | None = None,
+                       temperature: float | None = None,
+                       routing_notes: str = "", supports_tools: bool = True,
+                       description: str = "") -> dict:
+    """Register a model — the Register dialog's road: right, terms, the
+    provider check, then the save. The key is encrypted at rest and never
+    returned; the result says has_api_key only."""
+    def _run():
+        from authn.permissions.checker import PermissionChecker
+        from intelligence import services as intel_svc
+        from intelligence.schema import ModelConfigIn
+
+        company = _company()
+        if not PermissionChecker.can(user, "model_config.create", company=company):
+            raise GatewayToolError("You don't have permission to create model configs.")
+        if not accept_provider_terms:
+            raise GatewayToolError(
+                "You must accept the model provider's terms of service — ask the person, "
+                "then pass accept_provider_terms=true. Nothing was saved.")
+        check = _run_model_check(company, provider, model_id, api_key, api_base)
+        fields = {
+            "name": name, "provider": provider, "model_id": model_id,
+            "api_key": api_key or None, "api_base": api_base or None,
+            "description": description or None, "licence_accepted": True,
+            "routing_notes": routing_notes or "", "supports_tools": supports_tools,
+        }
+        # Unsent sizes keep ModelConfigIn's own defaults — same as the dialog.
+        if context_window is not None:
+            fields["context_window"] = context_window
+        if max_output_tokens is not None:
+            fields["max_output_tokens"] = max_output_tokens
+        if temperature is not None:
+            fields["temperature"] = temperature
+        try:
+            config = intel_svc.create_model_config(company, user, ModelConfigIn(**fields).dict())
+        except ValueError as exc:
+            raise GatewayToolError(str(exc))
+        return {**_model_summary(config), "checked": True,
+                "latency_ms": check.get("latency_ms")}
+    return await sync_to_async(_run)()
+
+
+async def update_model(user, config_id: str, name: str | None = None,
+                       provider: str | None = None, model_id: str | None = None,
+                       api_key: str | None = None, api_base: str | None = None,
+                       context_window: int | None = None,
+                       max_output_tokens: int | None = None,
+                       temperature: float | None = None,
+                       routing_notes: str | None = None,
+                       supports_tools: bool | None = None,
+                       description: str | None = None) -> dict:
+    """Edit a model — the Edit dialog's road. Changing how it is reached
+    (provider, model id, API base, key) re-runs the provider check first;
+    every persona on the config follows the saved change. Key write-only."""
+    def _run():
+        from authn.permissions.checker import PermissionChecker
+        from intelligence import services as intel_svc
+
+        company = _company()
+        if not PermissionChecker.can(user, "model_config.update", company=company):
+            raise GatewayToolError("You don't have permission to edit model configs.")
+        config = intel_svc.get_model_config(company, config_id)
+        if not config:
+            raise GatewayToolError("No such model config.")
+        data = {k: v for k, v in {
+            "name": name, "provider": provider, "model_id": model_id,
+            "api_key": api_key, "api_base": api_base,
+            "context_window": context_window, "max_output_tokens": max_output_tokens,
+            "temperature": temperature, "routing_notes": routing_notes,
+            "supports_tools": supports_tools, "description": description,
+        }.items() if v is not None}
+        if not data:
+            raise GatewayToolError("Nothing to change — pass at least one field.")
+        reach_changed = any(k in data for k in ("provider", "model_id", "api_base", "api_key"))
+        if reach_changed:
+            # Merged values, the dialog's way: a blank key means the stored one.
+            _run_model_check(
+                company,
+                data.get("provider") or config.provider,
+                data.get("model_id") or config.model_id,
+                data.get("api_key"),
+                data.get("api_base") if "api_base" in data else config.api_base,
+                config_id=None if data.get("api_key") else str(config.id),
+            )
+        try:
+            config = intel_svc.update_model_config(company, config_id, data)
+        except ValueError as exc:
+            raise GatewayToolError(str(exc))
+        if not config:
+            raise GatewayToolError("No such model config.")
+        return {**_model_summary(config), "checked": reach_changed}
+    return await sync_to_async(_run)()
+
+
+def _persona_summary(persona) -> dict:
+    return {
+        "id": str(persona.id), "name": persona.name, "mention": f"@{persona.name}",
+        "description": persona.description or "",
+        "project_id": str(persona.project_id),
+        "model": persona.model.name if persona.model_id else None,
+        "output_type": persona.prompt.output_type if getattr(persona, "prompt", None) else None,
+        "tool_servers": [s.name for s in persona.mcp_servers.all() if s.is_active],
+        "max_steps": persona.max_steps,
+        "acts_after_approval": persona.acts_after_approval,
+    }
+
+
+async def list_personas(user, project_id: str) -> list[dict]:
+    """One project's personas — the same visibility the app's list uses."""
+    def _run():
+        from intelligence import services as intel_svc
+        from workspace import services as ws_svc
+
+        company = _company()
+        project = ws_svc.get_project(company, user, project_id)
+        if not project:
+            raise GatewayToolError("No such project.")
+        return [_persona_summary(p) for p in intel_svc.list_personas(project, user)]
+    return await sync_to_async(_run)()
+
+
+async def create_persona(user, project_id: str, name: str, system_prompt: str,
+                         model_config_id: str, description: str = "",
+                         output_type: str = "auto",
+                         mcp_server_ids: list | None = None) -> dict:
+    """Create a persona — the dialog's road: persona.create on the project,
+    the same wiring rules (model attached to the project, …)."""
+    def _run():
+        from authn.permissions.checker import PermissionChecker
+        from intelligence import services as intel_svc
+        from intelligence.schema import PersonaIn, PromptIn
+        from workspace import services as ws_svc
+
+        company = _company()
+        project = ws_svc.get_project(company, user, project_id)
+        if not project:
+            raise GatewayToolError("No such project.")
+        if not PermissionChecker.can(user, "persona.create", obj=project):
+            raise GatewayToolError("You don't have permission to create personas in this project.")
+        if not (system_prompt or "").strip():
+            raise GatewayToolError("system_prompt is empty.")
+        payload = PersonaIn(
+            name=name, description=description or None, project_id=str(project.id),
+            model_config_id=model_config_id,
+            mcp_server_ids=[str(s) for s in (mcp_server_ids or [])],
+            prompt=PromptIn(system_prompt=system_prompt, output_type=(output_type or "auto")),
+        ).dict()
+        try:
+            persona = intel_svc.create_persona(company, user, payload)
+        except ValueError as exc:
+            raise GatewayToolError(str(exc))
+        return {**_persona_summary(persona),
+                "note": f"Mention {persona.name} in a topic as @{persona.name} to use it."}
+    return await sync_to_async(_run)()
+
+
+async def update_persona(user, persona_id: str, name: str | None = None,
+                         description: str | None = None,
+                         system_prompt: str | None = None,
+                         output_type: str | None = None,
+                         model_config_id: str | None = None,
+                         max_steps: int | None = None,
+                         acts_after_approval: bool | None = None) -> dict:
+    """Edit a persona — persona.update on its project, the dialog's rules."""
+    def _run():
+        from authn.permissions.checker import PermissionChecker
+        from intelligence import services as intel_svc
+        from nucleus.models import Persona
+        from workspace import services as ws_svc
+
+        company = _company()
+        try:
+            persona = (Persona.objects.filter(company=company, id=persona_id, is_active=True)
+                       .select_related("project", "prompt").first())
+        except Exception:  # noqa: BLE001 — a malformed id is just "no such persona"
+            persona = None
+        # Invisible answers like nonexistent — the project must be theirs to see.
+        if not persona or not ws_svc.get_project(company, user, str(persona.project_id)):
+            raise GatewayToolError("No such persona.")
+        if not PermissionChecker.can(user, "persona.update", obj=persona.project):
+            raise GatewayToolError("You don't have permission to edit this persona.")
+        data = {k: v for k, v in {
+            "name": name, "description": description,
+            "model_config_id": model_config_id, "max_steps": max_steps,
+            "acts_after_approval": acts_after_approval,
+        }.items() if v is not None}
+        if system_prompt is not None or output_type is not None:
+            current = getattr(persona, "prompt", None)
+            text = system_prompt if system_prompt is not None else (current.system_prompt if current else "")
+            if not (text or "").strip():
+                raise GatewayToolError("system_prompt is empty.")
+            data["prompt"] = {
+                "system_prompt": text,
+                "output_type": output_type or (current.output_type if current else "auto"),
+            }
+        if not data:
+            raise GatewayToolError("Nothing to change — pass at least one field.")
+        try:
+            persona = intel_svc.patch_persona(company, persona_id, data)
+        except ValueError as exc:
+            raise GatewayToolError(str(exc))
+        if not persona:
+            raise GatewayToolError("No such persona.")
+        return _persona_summary(persona)
+    return await sync_to_async(_run)()
+
+
+async def list_users(user) -> list[dict]:
+    """The server's members — any member may look, like the Members page."""
+    def _run():
+        from workspace import members_services as members_svc
+
+        company = _company()
+        if not members_svc.get_member_access(company, user):
+            raise GatewayToolError("You are not a member of this server.")
+        rows = members_svc.list_members(company)
+        return [row if isinstance(row, dict) else dict(row) for row in rows]
+    return await sync_to_async(_run)()
+
+
+async def get_topic_messages(user, topic_id: str, ai_only: bool = False,
+                             limit: int = 50) -> list[dict]:
+    """One topic's transcript, newest last — the same row visibility chat
+    uses. ai_only=true keeps only the personas' replies."""
+    def _run():
+        from nucleus.models import ChatMessage
+
+        _company_, _project, topic = _find_topic(user, topic_id)
+        take = max(1, min(int(limit or 50), 200))
+        qs = ChatMessage.objects.filter(topic=topic, is_active=True).select_related("sender")
+        if ai_only:
+            qs = qs.filter(metadata__has_key="persona_id")
+        rows = list(qs.order_by("-sequence")[:take])[::-1]
+        out = []
+        for row in rows:
+            meta = row.metadata or {}
+            author = meta.get("persona_name") or (
+                getattr(row.sender, "display_name", "") or getattr(row.sender, "username", "") or ""
+                if row.sender_id else "")
+            out.append({
+                "id": str(row.id), "sequence": row.sequence, "author": author,
+                "ai": "persona_id" in meta, "status": row.status,
+                "content": row.content or "",
+                "created_at": row.created_at.isoformat(),
+            })
+        return out
+    return await sync_to_async(_run)()
+
+
+async def create_topic(user, channel_id: str, title: str) -> dict:
+    """Add a chat — topic.create on the channel, exactly the app's road."""
+    def _run():
+        from authn.permissions.checker import PermissionChecker
+        from nucleus.models import Channel
+        from workspace import services as ws_svc
+
+        company = _company()
+        if not (title or "").strip():
+            raise GatewayToolError("title is empty.")
+        try:
+            channel = (Channel.objects.filter(id=channel_id, is_active=True)
+                       .select_related("project").first())
+        except Exception:  # noqa: BLE001
+            channel = None
+        project = ws_svc.get_project(company, user, str(channel.project_id)) if channel else None
+        if not channel or not project:
+            raise GatewayToolError("No such channel.")
+        if not PermissionChecker.can(user, "topic.create", obj=channel):
+            raise GatewayToolError("You don't have permission to create topics in this channel.")
+        topic = ws_svc.create_topic(company=company, project=project, channel=channel,
+                                    title=title.strip(), creator=user)
+        return {"id": str(topic.id), "title": topic.title,
+                "channel_id": str(topic.channel_id), "project_id": str(topic.project_id)}
+    return await sync_to_async(_run)()
+
+
+async def update_topic(user, topic_id: str, title: str = "",
+                       archive: bool | None = None) -> dict:
+    """Rename and/or archive/restore a topic — topic.update for the rename,
+    topic.archive for both archive and restore, the app's exact gates."""
+    def _run():
+        from authn.permissions.checker import PermissionChecker
+        from nucleus.models import ChatTopic
+        from workspace import services as ws_svc
+
+        company = _company()
+        if not (title or "").strip() and archive is None:
+            raise GatewayToolError("Nothing to change — pass a title and/or archive.")
+        # Fetched WITHOUT the active filter: restoring an archived topic is
+        # the point of archive=false (the app's unarchive road).
+        try:
+            topic = (ChatTopic.objects.filter(id=topic_id)
+                     .select_related("project", "channel").first())
+        except Exception:  # noqa: BLE001
+            topic = None
+        project = ws_svc.get_project(company, user, str(topic.project_id)) if topic else None
+        if not topic or not project:
+            raise GatewayToolError("No such topic.")
+        out = {"id": str(topic.id), "title": topic.title, "archived": not topic.is_active}
+        if (title or "").strip():
+            if not topic.is_active:
+                raise GatewayToolError("This topic is archived — restore it first (archive=false).")
+            if not PermissionChecker.can(user, "topic.update", obj=topic):
+                raise GatewayToolError("You don't have permission to rename this topic.")
+            topic = ws_svc.update_topic(project, topic.channel, topic, title.strip())
+            out.update({"title": topic.title})
+        if archive is not None:
+            if not PermissionChecker.can(user, "topic.archive", obj=topic):
+                raise GatewayToolError("You don't have permission to archive or restore this topic.")
+            if archive:
+                ws_svc.archive_topic(topic)
+            else:
+                ws_svc.unarchive_topic(topic)
+            out["archived"] = bool(archive)
+        return out
     return await sync_to_async(_run)()
 
 

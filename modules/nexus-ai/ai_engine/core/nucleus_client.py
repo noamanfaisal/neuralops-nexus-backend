@@ -21,6 +21,9 @@ from ai_engine.core.specs import HistoryRow, ModelRole, ModelSpec, PauseInfo, Pe
 log = logging.getLogger(__name__)
 
 USAGE_PATH = "/api/v1/internal/usage/"  # new endpoint — nucleus change (1)
+# 1.3.0 AI audit log: the legacy per-request log endpoint, now carrying the
+# prompt ANATOMY (topic/project scope + breakdown). One POST per model run.
+REQUEST_LOG_PATH = "/api/v1/internal/ai-request-logs/"
 # Item 2 / item 27 — nucleus change (9): store a paused run's state under its
 # message; the resume trigger carries it back verbatim.
 PAUSE_PATH = "/api/v1/internal/messages/{msg_id}/pause/"
@@ -62,6 +65,19 @@ class NucleusClient:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(url, json=payload, headers=self._headers)
             response.raise_for_status()
+
+    async def record_request_log(self, entries: list[dict]) -> None:
+        """1.3.0 audit: POST each run's anatomy record. The endpoint takes ONE
+        record per call (legacy shape), so this loops — a reply writes 1–3.
+        The CALLER decides what a failure means; per the Layer 0 rules it is
+        logged and never turns a good reply into an error."""
+        if not entries:
+            return
+        url = f"{self._base_url}{REQUEST_LOG_PATH}"
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            for entry in entries:
+                response = await client.post(url, json=entry, headers=self._headers)
+                response.raise_for_status()
 
     async def get_nudges(self, msg_id: str) -> list[str]:
         """W8 (Layer 4): what the caller typed while this reply runs — taken
@@ -173,6 +189,13 @@ def persona_from(data: dict, company_id: str, project_id: str) -> PersonaSpec:
         tool_access=data.get("tool_access") or "selected",  # nucleus change (7); absent → selected
         approval_scope=data.get("approval_scope") or "topic",  # item 2 decision 5; absent → topic
         delegation_enabled=bool(data.get("delegation_enabled", False)),  # item 46 (Layer 6)
+        # MCP suggest-attach (option 2): names + one-liners of the project's
+        # other servers — prompt content only; absent from an older nucleus.
+        other_servers=tuple(
+            (str(s.get("name")), str(s.get("description") or ""))
+            for s in (data.get("other_servers") or [])
+            if isinstance(s, dict) and s.get("name")
+        ),
     )
 
 

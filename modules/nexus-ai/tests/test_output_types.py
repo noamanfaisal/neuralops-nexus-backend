@@ -145,7 +145,10 @@ async def test_ot13_persona_default_rides_the_whole_trigger(harness):
     events = await harness.trigger(harness.job(output_type="auto"))
     [done] = _by_type(events, "message_done")
     assert done["output_type"] == "text" and done["render_as"] == "text"
-    assert done["content"] == "Plain words, no chart."
+    # The fake provider streams word-by-word, each with a trailing space, and
+    # a plain text reply stays BYTE-IDENTICAL to the stream (T1's contract) —
+    # so the content ends with that stream's trailing space. Compare trimmed.
+    assert done["content"].strip() == "Plain words, no chart."
 
 
 def test_ot2_unmarked_chart_recovered_only_when_asked():

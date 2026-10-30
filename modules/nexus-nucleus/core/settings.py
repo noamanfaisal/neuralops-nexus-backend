@@ -52,6 +52,12 @@ if not SECRET_KEY:
 # endpoint — enforces its own 64 KB itself, from the Content-Length header,
 # before the body is read (scheduling/hooks_api.py HOOK_MAX_BODY_BYTES).
 DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
+# File viewer part 3: the per-file cap for uploads into a project's folder
+# (workspace/files.save_upload). Its own setting on purpose — the 16 MB cap
+# above only counts ordinary form data, never multipart FILE parts, so a
+# bigger upload passes Django untouched; nginx's client_max_body_size (50m)
+# is the outer wall. Change both together.
+FILES_UPLOAD_MAX_BYTES = int(os.getenv("FILES_UPLOAD_MAX_BYTES", 50 * 1024 * 1024))
 # Self-hosted servers are reached by LAN addresses, Tailscale names and
 # tunnels nobody can predict, and auth is bearer-token (the Host header never
 # mints links or cookies here) — so the default stays open, and a deployment

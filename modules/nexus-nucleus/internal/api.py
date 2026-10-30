@@ -94,6 +94,18 @@ class MCPServerInternal(Schema):
     tools: list = Field(default_factory=list)
 
 
+class OtherServerInternal(Schema):
+    """
+    MCP suggest-attach (owner's "option 2", ruled 2026-10-22): one of the
+    PROJECT's other external servers — its NAME and one line, and nothing
+    else. Never its tools, url, transport or secrets: the persona may point
+    at the wall ("this project has X; someone with edit rights can attach
+    it"), never climb it.
+    """
+    name: str
+    description: str = ""
+
+
 class PromptInternal(Schema):
     system_prompt: str
     output_type: str
@@ -198,6 +210,10 @@ class PersonaInternal(Schema):
     # In order, keys decrypted like the primary's: what the worker tries when
     # `model` cannot answer (W7). Retired configs are left out.
     fallback_models: list[ModelInternal] = Field(default_factory=list)
+    # MCP suggest-attach (option 2): the project's OTHER external servers,
+    # names + one-liners only — the engine turns them into one prompt section.
+    # An older engine image simply ignores the field.
+    other_servers: list[OtherServerInternal] = Field(default_factory=list)
     # REMOVED (2026-10-22): recall_enabled — the Recall feature left the
     # product; an older engine image reading it gets its own default (True)
     # and simply finds no recall collection to search.
@@ -233,6 +249,13 @@ class AIRequestLogIn(Schema):
     latency_ms: int = 0
     status: str = "success"
     error: Optional[str] = None
+    # AI audit log (1.3.0): scope + the prompt anatomy. Optional so an older
+    # engine's plain write still lands.
+    topic_id: str = ""
+    project_id: str = ""
+    role: str = ""
+    model_name: str = ""
+    breakdown: dict = Field(default_factory=dict)
 
 
 class AIConfigInternal(Schema):
@@ -406,12 +429,31 @@ def get_persona_internal(request, persona_id: str):
     # refresh), and the consumer wants them apart anyway.
     mcp_servers = []
     capabilities = []
+    attached_ids = set()
     for server in persona.mcp_servers.filter(is_active=True):
+        attached_ids.add(server.id)
         if server.is_internal:
             capabilities.append(_capability_internal(server))
             continue
         ok = oauth_client.refresh_if_needed(server)
         mcp_servers.append(_mcp_internal(server, needs_reauth=not ok))
+
+    # MCP suggest-attach (option 2, ruled 2026-10-22): the project's OTHER
+    # external servers, names + one-liners only — enough for the persona to
+    # say "this project has X; someone with edit rights can attach it",
+    # never enough to see or call anything. Found live: "what shopping tools
+    # do you have?" → "none" while Shopping (demo) sat one tick away.
+    from nucleus.models import MCPServer
+    other_servers = [
+        OtherServerInternal(
+            name=s.name,
+            description=((getattr(s, "description", "") or "").strip())[:200],
+        )
+        for s in MCPServer.objects.filter(
+            project=persona.project, is_active=True, is_internal=False,
+        ).order_by("name")
+        if s.id not in attached_ids
+    ]
 
     return PersonaInternal(
         id=str(persona.id),
@@ -438,6 +480,7 @@ def get_persona_internal(request, persona_id: str):
         max_steps=persona.max_steps,
         tool_levels=persona.tool_levels or {},
         fallback_models=[_model_internal(m) for m in fallback_models_of(persona)],
+        other_servers=other_servers,
     )
 
 
@@ -541,10 +584,11 @@ def get_topic_contexts(request, topic_id: str):
 @router.post("/ai-request-logs/", response={201: dict})
 def create_ai_request_log(request, payload: AIRequestLogIn):
     """
-    Called by nexus-ai after every model completion.
-    Writes a log record with the full prompt + raw response.
+    Called by nexus-ai after every model run of a reply (1.3.0: the new
+    engine now writes here too). Writes one log record with the prompt
+    ANATOMY (breakdown) + the raw response — what the audit viewer reads.
     """
-    from nucleus.models import AIRequestLog, Persona, Company
+    from nucleus.models import AIRequestLog, Company, Persona, Project
 
     company = Company.objects.filter(is_active=True).first()
     if not company:
@@ -553,6 +597,9 @@ def create_ai_request_log(request, payload: AIRequestLogIn):
     persona = None
     if payload.persona_id:
         persona = Persona.objects.filter(id=payload.persona_id, is_active=True).first()
+    project = None
+    if payload.project_id:
+        project = Project.objects.filter(id=payload.project_id).first()
 
     AIRequestLog.objects.create(
         company=company,
@@ -568,6 +615,11 @@ def create_ai_request_log(request, payload: AIRequestLogIn):
         latency_ms=payload.latency_ms,
         status=payload.status,
         error=payload.error,
+        topic_id=payload.topic_id or "",
+        project=project,
+        role=payload.role or "",
+        model_name=payload.model_name or "",
+        breakdown=payload.breakdown or {},
     )
     return 201, {"ok": True}
 

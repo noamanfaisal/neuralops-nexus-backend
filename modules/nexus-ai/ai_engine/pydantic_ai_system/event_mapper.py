@@ -67,6 +67,21 @@ def preview_of(content: Any) -> str | None:
     return text[:TOOL_PREVIEW_CHARS]
 
 
+# File viewer part 2: the filesystem tools that WRITE. Suffix-matched like the
+# compaction pass's read_file rule (toolset_builder._read_file_key) — the
+# harness names arrive bare ("write_file") or prefixed, both end the same.
+_WRITE_TOOL_SUFFIXES = ("write_file", "edit_file", "append_file", "create_file")
+
+
+def written_path_of(name: str, args: dict | None) -> str | None:
+    """The file a WRITE tool touched (its `path` argument), None otherwise —
+    nucleus turns these into the reply's file chips."""
+    if not name.endswith(_WRITE_TOOL_SUFFIXES):
+        return None
+    path = (args or {}).get("path")
+    return path if isinstance(path, str) and path.strip() else None
+
+
 def url_of(name: str, args: dict | None) -> str | None:
     """The page a web tool call is about: web_fetch's url, or a results page
     for a search query. None otherwise. (0.8.0's rule, kept.)"""
@@ -144,6 +159,7 @@ class EventMapper:
                     preview=preview_of(content) if ok else None,
                     error=(preview_of(content) or "")[:TOOL_ERROR_CHARS] or None if not ok else None,
                     url=url_of(name, args),
+                    path=written_path_of(name, args) if ok else None,
                 ),
             )]
         if isinstance(event, DeferredToolRequestsEvent):

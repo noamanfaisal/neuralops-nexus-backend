@@ -92,6 +92,23 @@ REGISTRY = [
      "Archive (soft-delete) a project, or view it once archived. Reversible in "
      "principle via Project.restore() -- there's just no endpoint for that yet. "
      "Same right gates both archiving and the include_archived view."),
+    # File viewer part 3 (docs/FILE-VIEWER-PANE.md §4): uploading into the
+    # project folder is a WRITE to shared content, so it gets its own right —
+    # Admins and Members by default, never Viewers. Reading the folder stays
+    # on project.view like every other read.
+    ("project.files_write", ObjectType.PROJECT, ScopeType.PROJECT,
+     "Upload files into the project's folder from the Files pane. Reading "
+     "stays open to anyone who can see the project; viewers can't upload."),
+    # AI audit log (1.3.0): seeing HOW a reply's prompt was assembled means
+    # seeing the project brief, every persona's system prompt, retrieval
+    # snippets and raw model output across the whole project — Admin-tier,
+    # like reading the project's other definitions. Deliberately absent from
+    # Member/Viewer bundles.
+    ("project.audit", ObjectType.PROJECT, ScopeType.PROJECT,
+     "Read the AI audit log: for every AI reply in the project, the full "
+     "prompt as it was assembled (system prompt, project brief, tool "
+     "catalog, retrieved memory, files, history) plus the raw response and "
+     "token counts."),
 
     # ── Channel ─────────────────────────────────────────────────────────────
     # Channels are not their own assignable scope — they're always reached
@@ -239,7 +256,7 @@ DEFAULT_ROLE_RIGHTS = {
         "company.invite_member", "company.remove_member", "company.local_password",
         "gateway.token",
         "project.create", "project.list", "project.view", "project.archive", "project.update", "project.terminal", "project.browser",
-        "project.embedder",
+        "project.embedder", "project.files_write", "project.audit",
         "channel.create", "channel.list", "channel.update", "channel.archive",
         "topic.create", "topic.list", "topic.update", "topic.mark_read", "topic.archive",
         "session.create", "session.close",
@@ -268,7 +285,7 @@ DEFAULT_ROLE_RIGHTS = {
     ],
 
     "Member": [
-        "project.list", "project.view",
+        "project.list", "project.view", "project.files_write",
         "channel.list",
         "topic.create", "topic.list", "topic.update", "topic.mark_read",
         "session.create", "session.close",

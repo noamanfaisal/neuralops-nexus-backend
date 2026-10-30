@@ -64,4 +64,29 @@ class PromptLayout:
                     "as remembered (\"earlier we ran …\"), never as fresh."
                 ),
             ))
+        # getattr, not a plain read: build() is also called with lighter
+        # persona-shaped objects (ot9's unit test, older callers) that predate
+        # the field — absent means none, never an error.
+        if getattr(persona, "other_servers", ()):
+            # MCP suggest-attach (owner's "option 2", ruled 2026-10-22): the
+            # persona may SEE that other servers exist in the project — names
+            # and one-liners only, never their tools — so "what shopping tools
+            # do you have?" gets "this project has Shopping; ask someone with
+            # edit rights to attach it" instead of a flat "none" (found live).
+            # The attach stays a HUMAN CLICK gated by the persona-edit right;
+            # nothing in this text can arm the persona, and a crafted message
+            # cannot either — the list comes from nucleus, not the chat.
+            # Priority 70: under budget pressure this drops before the catalog.
+            lines = "\n".join(
+                f"- {name}: {one_line}" if one_line else f"- {name}"
+                for name, one_line in persona.other_servers  # type: ignore[union-attr]
+            )
+            sections.append(PromptSection(
+                kind="other_servers", priority=70, stable=True,
+                text="Tool servers that exist in this project but are NOT attached to you:\n"
+                     + lines
+                     + "\nYou cannot see or call their tools, and must never pretend to. "
+                       "When one would clearly help with what was asked, say so and name it — "
+                       "someone with persona-edit rights can attach it to you under Intelligence.",
+            ))
         return PromptPlan(instructions=tuple(sections), history=bundle.history, message=message)

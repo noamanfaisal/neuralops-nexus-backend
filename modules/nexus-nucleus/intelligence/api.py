@@ -36,13 +36,15 @@ from .schema import (
     PromptTemplateOut,
     CompanyAIConfigIn, CompanyAIConfigOut,
     AIRequestLogOut,
+    AuditEntryOut, AuditEntryDetailOut,
     ListTemplatePrompts,
     TemplatePromptContent,
 )
 from . import services as svc
 from .schema import RoutineIn, RoutinePatchIn, RoutineOut
-from .schema import MCPCatalogEntryOut, PersonaCatalogEntryOut
+from .schema import MCPCatalogEntryOut, ModelPresetOut, PersonaCatalogEntryOut
 from intelligence import mcp_catalog as mcp_catalog_content
+from intelligence import model_presets as model_presets_content
 from intelligence import persona_catalog as persona_catalog_content
 
 router = Router(tags=["Intelligence"], auth=SupabaseBearer())
@@ -737,8 +739,15 @@ def update_ai_config(request, payload: CompanyAIConfigIn):
 
 @router.get("/ai-request-logs/", response=List[AIRequestLogOut])
 def list_ai_request_logs(request):
-    """Return the last 200 AI request logs, newest first."""
+    """Return the last 200 AI request logs, newest first (legacy shape).
+
+    1.3.0: now gated. This lists raw prompts and responses across the WHOLE
+    company, and before the audit work it was readable by anyone signed in.
+    A project-scoped admin uses /audit/ below; this company-wide view needs
+    the right held at company reach."""
     company = _company(request)
+    if not PermissionChecker.can(request.auth, "project.audit", company=company):
+        raise HttpError(403, "You don't have permission to read the AI audit log.")
     logs = (
         AIRequestLog.objects.filter(company=company)
         .order_by("-created_at")[:200]
@@ -764,6 +773,80 @@ def list_ai_request_logs(request):
     ]
 
 
+# ── AI audit log (1.3.0) ──────────────────────────────────────────────────────
+# "How was this reply's prompt built?" — per project, filterable to one topic
+# or one message. Gated on project.audit (Admin-tier) because the rows carry
+# the project brief, persona system prompts, retrieval snippets and raw model
+# output.
+
+def _audit_entry(log, persona_names: dict, detail: bool = False):
+    base = dict(
+        id=str(log.id),
+        created_at=log.created_at.isoformat(),
+        msg_id=log.msg_id,
+        topic_id=log.topic_id or "",
+        persona_id=str(log.persona_id) if log.persona_id else None,
+        persona_name=persona_names.get(log.persona_id, ""),
+        role=log.role or "",
+        provider=log.provider,
+        model_id=log.model_id,
+        model_name=log.model_name or "",
+        status=log.status,
+        latency_ms=log.latency_ms,
+        prompt_tokens=log.prompt_tokens,
+        completion_tokens=log.completion_tokens,
+        error=log.error,
+    )
+    if not detail:
+        return AuditEntryOut(**base)
+    return AuditEntryDetailOut(**base, breakdown=log.breakdown or {}, response=log.response or "")
+
+
+def _audit_project(request, project_id: str):
+    company = _company(request)
+    project = Project.objects.filter(company=company, id=project_id, is_active=True).first()
+    if not project:
+        raise HttpError(404, "Project not found.")
+    if not PermissionChecker.can(request.auth, "project.audit", obj=project):
+        raise HttpError(403, "You don't have permission to read this project's AI audit log.")
+    return company, project
+
+
+def _persona_names(logs) -> dict:
+    ids = {log.persona_id for log in logs if log.persona_id}
+    if not ids:
+        return {}
+    return {p.id: p.name for p in Persona.objects.filter(id__in=ids)}
+
+
+@router.get("/projects/{project_id}/audit/", response=List[AuditEntryOut])
+def list_audit_entries(request, project_id: str,
+                       topic_id: Optional[str] = None,
+                       msg_id: Optional[str] = None,
+                       limit: int = 50):
+    """Newest first. Summary rows only — the anatomy rides on the detail route."""
+    _company_, project = _audit_project(request, project_id)
+    qs = AIRequestLog.objects.filter(project=project)
+    if topic_id:
+        qs = qs.filter(topic_id=topic_id)
+    if msg_id:
+        qs = qs.filter(msg_id=msg_id)
+    logs = list(qs.order_by("-created_at")[: max(1, min(limit, 200))])
+    names = _persona_names(logs)
+    return [_audit_entry(log, names) for log in logs]
+
+
+@router.get("/projects/{project_id}/audit/{log_id}/", response=AuditEntryDetailOut)
+def get_audit_entry(request, project_id: str, log_id: str):
+    """One run in full: the prompt anatomy (breakdown) + the raw response."""
+    _company_, project = _audit_project(request, project_id)
+    log = AIRequestLog.objects.filter(project=project, id=log_id).first()
+    if not log:
+        raise HttpError(404, "Audit entry not found.")
+    names = _persona_names([log])
+    return _audit_entry(log, names, detail=True)
+
+
 # ── Output Types (M7) ─────────────────────────────────────────────────────────
 
 # ── Catalogues (W11 tool catalog, W18 persona catalogue) ─────────────────────
@@ -786,6 +869,17 @@ def persona_catalog(request):
     if not PermissionChecker.can(request.auth, "persona.list", obj=company):
         raise HttpError(403, "You don't have permission to see personas.")
     return persona_catalog_content.catalog()
+
+
+@router.get("/model-presets/", response=List[ModelPresetOut])
+def model_presets(request):
+    """Free-LLM onboarding WP1: the "Free to start" tiles for /add-model.
+    Content like the other catalogues; reading it needs the right that lists
+    models. Nothing here is a credential — the person brings their own key."""
+    company = _company(request)
+    if not PermissionChecker.can(request.auth, "model_config.list", obj=company):
+        raise HttpError(403, "You don't have permission to see models.")
+    return model_presets_content.catalog()
 
 
 @router.get("/output-types/")

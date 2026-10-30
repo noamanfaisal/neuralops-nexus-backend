@@ -524,7 +524,9 @@ class CatalogueTests(MentionRightFixture):
         r = self.call("get", "/api/v1/persona-catalog/", self.sara)
         self.assertEqual(r.status_code, 200, r.content)
         rows = r.json()
-        self.assertEqual({e["id"] for e in rows}, {e["id"] for e in persona_catalog.PERSONA_CATALOG})
+        # The catalogue is the hand-kept entries PLUS the rendered "Guide"
+        # (setup-helper, free-LLM WP2 — built at read time from the presets).
+        self.assertEqual({e["id"] for e in rows}, {e["id"] for e in persona_catalog.PERSONA_CATALOG} | {"setup-helper"})
         for e in rows:
             self.assertTrue(e["name"] and e["role"] and e["purpose"], e["id"])
             self.assertGreater(len(e["system_prompt"]), 80, e["id"])  # a real prompt, not a label
@@ -940,3 +942,184 @@ class SaveLockTests(MentionRightFixture):
         self.assertTrue(r.json()["ok"])
         self.model_config.refresh_from_db()
         self.assertIsNotNone(self.model_config.last_check_ok_at)
+
+
+class FreeStartPresetTests(MentionRightFixture):
+    """Free-LLM onboarding WP1+2 (owner's work order 2026-10-23): the "Free to
+    start" presets ride as content with their honesty notes, and the setup
+    helper's prompt is RENDERED from them — never hardcoded, never a key."""
+
+    def test_the_presets_ride_with_their_honesty_notes(self):
+        r = self.call("get", "/api/v1/model-presets/", self.sara)  # a Member may list models
+        self.assertEqual(r.status_code, 200, r.content)
+        presets = {p["id"]: p for p in r.json()}
+        # The owner's seven; each with a key page and BOTH honesty notes.
+        self.assertEqual(set(presets), {"github-models", "gemini", "groq", "openrouter-free", "mistral", "cerebras", "ollama"})
+        for p in presets.values():
+            self.assertTrue(p["key_page"].startswith("https://"), p["id"])
+            self.assertTrue(p["rate_note"] and p["data_note"], p["id"])
+            self.assertNotIn("api_key", p)  # nothing here is ever a credential
+        # Ollama is the keyless, private option — flagged as such.
+        self.assertFalse(presets["ollama"]["needs_key"])
+        self.assertTrue(presets["ollama"]["private"])
+        # Every provider value is one the Register dialog accepts verbatim.
+        from nucleus.models import ModelConfig
+        for p in presets.values():
+            self.assertIn(p["provider"], ModelConfig.Provider.values, p["id"])
+
+    def test_the_setup_helper_rides_the_persona_catalogue_with_a_rendered_prompt(self):
+        r = self.call("get", "/api/v1/persona-catalog/", self.sara)
+        self.assertEqual(r.status_code, 200, r.content)
+        helper = next(e for e in r.json() if e["id"] == "setup-helper")
+        prompt = helper["system_prompt"]
+        # Rule (b): the provider list is rendered FROM the presets — every key
+        # page appears, so a preset edit updates newly created helpers.
+        from intelligence import model_presets
+        for preset in model_presets.MODEL_PRESETS:
+            self.assertIn(preset["key_page"], prompt)
+        # The hard rules, in the prompt's own words: keys never in chat,
+        # honest about limits and training, Ollama named as the private path,
+        # the hand-off to the Free-to-start tiles.
+        self.assertIn("NEVER ask for an API key in chat", prompt)
+        self.assertIn("rate-limited", prompt)
+        self.assertIn("Ollama", prompt)
+        self.assertIn("Free to start", prompt)
+        # It guides — no tools to act with until WP3's register_model lands.
+        self.assertEqual(helper["capabilities"], [])
+
+    def test_an_openai_compatible_id_may_carry_separators(self):
+        # OpenRouter's and GitHub Models' REAL ids carry / and : — the bare-id
+        # guard stands for every native provider, never for a custom endpoint
+        # (the engine reaches those by api_base + the id as given).
+        r = self.call("post", "/api/v1/model-configs/", self.owner, {
+            "name": "OpenRouter free", "provider": "openai_compatible",
+            "model_id": "meta-llama/llama-3.3-70b-instruct:free",
+            "api_base": "https://openrouter.ai/api/v1", "api_key": "sk-or-x",
+            "licence_accepted": True,
+        })
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["model_id"], "meta-llama/llama-3.3-70b-instruct:free")
+        # A native provider keeps the wall — a pasted LiteLLM string still 400s.
+        r = self.call("post", "/api/v1/model-configs/", self.owner, {
+            "name": "Pasted prefix", "provider": "openai", "model_id": "openai/gpt-4o",
+            "api_key": "sk", "licence_accepted": True,
+        })
+        self.assertEqual(r.status_code, 400, r.content)
+
+
+class AuditLogTests(MentionRightFixture):
+    """1.3.0 AI audit log (owner's ask, 2026-10-29): per AI reply, HOW the
+    prompt was built — system prompt, project brief, tool catalog, retrieval,
+    files, history — readable per topic in every project, gated on the new
+    Admin-tier project.audit right. The engine writes through the internal
+    endpoint; people read through /projects/{id}/audit/."""
+
+    def write_log(self, **overrides):
+        import json as _json
+        import os
+        from unittest.mock import patch as _patch
+        from django.test import Client as _Client
+        payload = {
+            "job_id": "job-1", "msg_id": "msg-1", "persona_id": str(self.persona_sara.id),
+            "model_id": "gpt-test", "provider": "openai", "prompt": [],
+            "response": "the reply", "prompt_tokens": 11, "completion_tokens": 5,
+            "latency_ms": 42, "status": "done", "error": None,
+            "topic_id": str(self.t1.id), "project_id": str(self.p1.id),
+            "role": "STANDARD", "model_name": "GPT Test",
+            "breakdown": {
+                "sections": [{"kind": "persona_prompt", "chars": 10, "text": "You are S."},
+                             {"kind": "tool_catalog", "chars": 7, "text": "tools …"}],
+                "message": "hello", "history_count": 2,
+                "retrieval": [{"label": "auth.py", "score": 0.71, "kind": "context_source"}],
+                "extra_instructions": "", "resume": False, "fallback_attempt": 0,
+            },
+        }
+        payload.update(overrides)
+        with _patch.dict(os.environ, {"INTERNAL_API_KEY": "k"}):
+            r = _Client().post("/api/v1/internal/ai-request-logs/", data=_json.dumps(payload),
+                               content_type="application/json", HTTP_X_INTERNAL_API_KEY="k")
+        self.assertEqual(r.status_code, 201, r.content)
+        from nucleus.models import AIRequestLog
+        return AIRequestLog.objects.order_by("-created_at").first()
+
+    def test_the_engines_write_lands_with_its_anatomy(self):
+        log = self.write_log()
+        self.assertEqual(log.topic_id, str(self.t1.id))
+        self.assertEqual(log.project_id, self.p1.id)
+        self.assertEqual(log.role, "STANDARD")
+        self.assertEqual(log.model_name, "GPT Test")
+        self.assertEqual([s["kind"] for s in log.breakdown["sections"]],
+                         ["persona_prompt", "tool_catalog"])
+        self.assertEqual(log.breakdown["retrieval"][0]["label"], "auth.py")
+        # An OLDER engine's plain write (no new fields) still lands.
+        import json as _json
+        import os
+        from unittest.mock import patch as _patch
+        from django.test import Client as _Client
+        with _patch.dict(os.environ, {"INTERNAL_API_KEY": "k"}):
+            r = _Client().post("/api/v1/internal/ai-request-logs/", data=_json.dumps({
+                "job_id": "job-0", "msg_id": "msg-0", "model_id": "gpt-test",
+                "provider": "openai", "prompt": [], "response": "old shape",
+            }), content_type="application/json", HTTP_X_INTERNAL_API_KEY="k")
+        self.assertEqual(r.status_code, 201, r.content)
+        from nucleus.models import AIRequestLog
+        old = AIRequestLog.objects.get(msg_id="msg-0")
+        self.assertEqual(old.topic_id, "")
+        self.assertIsNone(old.project)
+        self.assertEqual(old.breakdown, {})
+
+    def test_only_the_audit_right_reads_the_project_log(self):
+        log = self.write_log()
+        path = f"/api/v1/projects/{self.p1.id}/audit/"
+        # Owner (whole registry) reads; the summary row carries NO anatomy.
+        r = self.call("get", path, self.owner)
+        self.assertEqual(r.status_code, 200, r.content)
+        [row] = r.json()
+        self.assertEqual(row["id"], str(log.id))
+        self.assertEqual(row["persona_name"], "Sara")
+        self.assertEqual(row["role"], "STANDARD")
+        self.assertEqual(row["prompt_tokens"], 11)
+        self.assertNotIn("breakdown", row)
+        self.assertNotIn("response", row)
+        # The detail row carries the full anatomy + the raw response.
+        r = self.call("get", f"{path}{log.id}/", self.owner)
+        self.assertEqual(r.status_code, 200, r.content)
+        detail = r.json()
+        self.assertEqual(detail["response"], "the reply")
+        self.assertEqual(detail["breakdown"]["message"], "hello")
+        # A Member holds no project.audit — the prompts stay out of reach.
+        self.assertEqual(self.call("get", path, self.sara).status_code, 403)
+        self.assertEqual(self.call("get", f"{path}{log.id}/", self.sara).status_code, 403)
+
+    def test_filters_narrow_to_topic_and_message(self):
+        self.write_log(msg_id="msg-1", topic_id="topic-a")
+        self.write_log(msg_id="msg-2", topic_id="topic-a")
+        self.write_log(msg_id="msg-3", topic_id="topic-b")
+        path = f"/api/v1/projects/{self.p1.id}/audit/"
+        r = self.call("get", path, self.owner)
+        self.assertEqual(len(r.json()), 3)
+        r = self.call("get", f"{path}?topic_id=topic-a", self.owner)
+        self.assertEqual(sorted(row["msg_id"] for row in r.json()), ["msg-1", "msg-2"])
+        r = self.call("get", f"{path}?msg_id=msg-3", self.owner)
+        self.assertEqual([row["msg_id"] for row in r.json()], ["msg-3"])
+
+    def test_another_projects_log_is_invisible(self):
+        log = self.write_log()
+        from nucleus.models import Project
+        # NOT "beta" — the invite fixture already owns that slug.
+        other = Project.objects.create(company=self.company, name="Gamma Audit", slug="gamma-audit")
+        r = self.call("get", f"/api/v1/projects/{other.id}/audit/", self.owner)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json(), [])
+        r = self.call("get", f"/api/v1/projects/{other.id}/audit/{log.id}/", self.owner)
+        self.assertEqual(r.status_code, 404)
+
+    def test_the_legacy_company_listing_is_now_gated(self):
+        # Before 1.3.0 ANY signed-in person could read every raw prompt and
+        # response in the company off this route — the hole this closes.
+        self.write_log()
+        r = self.call("get", "/api/v1/ai-request-logs/", self.sara)
+        self.assertEqual(r.status_code, 403, r.content)
+        r = self.call("get", "/api/v1/ai-request-logs/", self.owner)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(len(r.json()), 1)

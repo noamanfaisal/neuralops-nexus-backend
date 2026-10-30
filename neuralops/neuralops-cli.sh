@@ -8,6 +8,8 @@
 #   neuralops address     the current address (tunnel installs: re-syncs it)
 #   neuralops update [V]  back up, then upgrade to version V (default: latest)
 #   neuralops backup      database + secrets + project files into backups/
+#   neuralops restore D   put a backup folder back: database + project files
+#                         (secrets only onto a fresh install, or with --use-backup-secrets)
 #   neuralops logs [svc]  follow the logs (all services, or one: nucleus, nexus-ai…)
 #   neuralops restart | stop | start
 #   neuralops uninstall   remove the containers; data is kept unless you ask
@@ -124,6 +126,73 @@ cmd_backup() {
   warn "This backup holds your secrets. Keep it somewhere safe."
 }
 
+cmd_restore() {
+  # 1.3.0 backup & restore: put a `neuralops backup` folder back, onto THIS
+  # install — typically a fresh one. Replaces the database (both databases)
+  # and the project files. Secrets follow the append-only rule: an existing
+  # secrets.env is never overwritten unless --use-backup-secrets is passed —
+  # but a database restored from a DIFFERENT deployment cannot decrypt its
+  # stored model keys without the backup's FIELD_ENCRYPTION_KEY, so a
+  # mismatch refuses loudly instead of restoring unreadable data.
+  local dir="${1:-}" use_backup_secrets="${2:-}" answer="" ts
+  [ -n "$dir" ] || die "Usage: neuralops restore <backup folder> [--use-backup-secrets]"
+  [ -d "$dir" ] || die "No such backup folder: $dir"
+  [ -f "$dir/database.sql.gz" ] || die "That folder has no database.sql.gz — not a neuralops backup."
+  [ -f "$dir/projects.tar.gz" ] || die "That folder has no projects.tar.gz — not a neuralops backup."
+  ts="$(date +%Y%m%d-%H%M%S)"
+
+  # ── secrets first: they decide whether the restored data is readable ────
+  if [ -f "$dir/secrets.env" ]; then
+    if [ ! -s "$NEURALOPS_DIR/neuralops/secrets.env" ]; then
+      ( umask 077; cp "$dir/secrets.env" "$NEURALOPS_DIR/neuralops/secrets.env" )
+      ok "Secrets restored (this install had none yet)."
+    elif cmp -s "$dir/secrets.env" "$NEURALOPS_DIR/neuralops/secrets.env"; then
+      say "Secrets already match the backup."
+    elif [ "$use_backup_secrets" = "--use-backup-secrets" ]; then
+      ( umask 077; cp "$NEURALOPS_DIR/neuralops/secrets.env" "$NEURALOPS_DIR/neuralops/secrets.env.replaced-$ts" )
+      ( umask 077; cp "$dir/secrets.env" "$NEURALOPS_DIR/neuralops/secrets.env" )
+      warn "This install's secrets were REPLACED by the backup's (the old file is secrets.env.replaced-$ts)."
+    else
+      die "This install already has different secrets. The backup's database cannot be read without the backup's keys — re-run with --use-backup-secrets to use them (the current file is kept aside)."
+    fi
+  fi
+
+  warn "This REPLACES this server's database and project files with the backup."
+  read -r -p "  Type RESTORE to continue: " answer < /dev/tty || true
+  [ "$answer" = "RESTORE" ] || { say "Nothing restored."; return; }
+
+  say "Stopping the app while the data is swapped (the database stays up)…"
+  compose stop nucleus nucleus-celery nucleus-celery-beat nexus-ai centrifugo >/dev/null 2>&1 || true
+  compose up -d postgres >/dev/null
+  # shellcheck disable=SC2086
+  wait_for "the database" 120 $DOCKER exec neuralops-postgres pg_isready -U neuralops
+
+  say "Restoring the database (both databases)…"
+  # pg_dumpall carries CREATE DATABASE, so the old ones must go first.
+  # shellcheck disable=SC2016,SC2086
+  $DOCKER exec neuralops-postgres sh -c '
+    psql -U "$POSTGRES_USER" -d postgres -q -c "DROP DATABASE IF EXISTS \"$POSTGRES_DB\""
+    psql -U "$POSTGRES_USER" -d postgres -q -c "DROP DATABASE IF EXISTS nexus_vectors"
+  ' >/dev/null
+  # shellcheck disable=SC2086
+  gunzip -c "$dir/database.sql.gz" | $DOCKER exec -i neuralops-postgres \
+    sh -c 'psql -U "$POSTGRES_USER" -d postgres -q' >/dev/null || die "The database restore failed — nothing further was touched. See the output above."
+  ok "Database"
+
+  say "Restoring the project files…"
+  if [ -d "$NEURALOPS_DIR/projects" ]; then
+    $SUDO mv "$NEURALOPS_DIR/projects" "$NEURALOPS_DIR/projects.replaced-$ts"
+  fi
+  $SUDO tar -xzf "$dir/projects.tar.gz" -C "$NEURALOPS_DIR"
+  $SUDO chown -R 1000:1000 "$NEURALOPS_DIR/projects"
+  ok "Project files (the old folder, if any, is projects.replaced-$ts)"
+
+  say "Starting everything and bringing the database up to this version…"
+  compose up -d >/dev/null
+  setup_database
+  ok "Restored. Sign in and check a project — chats, models and files should all be back."
+}
+
 cmd_update() {
   local target="${1:-latest}"
   say "Updating to ${NEURALOPS_IMAGE_REPO}:${target}"
@@ -169,6 +238,7 @@ case "${1:-help}" in
   address)   cmd_address ;;
   update)    shift; cmd_update "${1:-latest}" ;;
   backup)    cmd_backup ;;
+  restore)   shift; cmd_restore "${1:-}" "${2:-}" ;;
   logs)      shift; compose logs --tail 100 -f "$@" ;;
   restart)   compose restart ;;
   stop)      compose stop ;;
@@ -182,44 +252,10 @@ case "${1:-help}" in
     say "  address         the server's current address"
     say "  update [ver]    back up, then upgrade (default: latest)"
     say "  backup          database + secrets + project files into backups/"
+    say "  restore <dir>   put a backup back (database + project files)"
     say "  logs [service]  follow the logs"
     say "  restart | stop | start"
     say "  uninstall       remove it (data kept unless you type DELETE)"
     echo
     ;;
 esac
-WHAT WE'RE BUILDING
-A one-command installer, so anyone can install NeuralOps on a Linux machine with one line:
-  curl -fsSL https://get.neuralopsnexus.ai | bash
-After that, a tool that lets us spin up demo servers on AWS / Google / Azure in one click for people who request a demo.
-
-WHERE TO GET THE CODE
-Repo: github.com/noamanfaisal/neuralops-nexus-backend
-Branch: step8-switchover
-(Tell me your GitHub username if you need access.)
-
-READ THESE, IN THIS ORDER
-1. docs/EASY-INSTALL-TASKS.md: your work list. Every task says exactly what to build, which files to touch, and how I'll check it.
-2. docs/EASY-INSTALL.md: the full design and background.
-3. install.sh and neuralops/neuralops-cli.sh: the first version is already written. You're improving it, not starting from zero.
-
-WHAT TO DO FIRST (Step 1)
-- Task 1.1: replace the Cloudflare tunnel with Tailscale (Funnel by default).
-- Task 1.2: make a half-finished install resume when it's run again.
-Then 1.3 (short address) and 1.4 (docs). Step 2 (demo servers) comes later, once we have cloud credits. Task 2.1 can be done earlier if you finish Step 1.
-
-HOW TO TEST
-Use a fresh Ubuntu 24.04 machine or VM with 4 GB+ of memory, and run the installer from your local copy:
-  NEURALOPS_RAW=file:///path/to/your/clone bash install.sh
-The scripts must pass shellcheck with no warnings.
-
-RULES THAT MATTER MOST
-- Never regenerate or overwrite secrets.env.
-- Never use docker compose down -v.
-- Messages in the installer are for non-technical people: short and clear.
-- If something isn't covered in the docs, ask me. Please don't guess. The open decisions are listed at the end of the tasks doc.
-
-HOW WE WORK
-You build a task and push it to a branch, then tell me. I run the checks in that task's Proof section, and once they pass, we move to the next task.
-
-Thanks!

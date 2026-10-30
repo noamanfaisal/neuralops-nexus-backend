@@ -91,7 +91,7 @@ def fire_persona_schedule(schedule_id: str) -> None:
     project = schedule.project
     company = schedule.company
     persona = schedule.persona
-    what = f"@{persona.name}" if persona is not None else f"runbook {schedule.runbook.title}" if schedule.runbook_id else "runbook"
+    what = f"@{persona.name}" if persona is not None else f"chain {schedule.runbook.title}" if schedule.runbook_id else "chain"
 
     channel_name = chat_svc.topic_channel(str(topic.id))
 
@@ -128,14 +128,16 @@ def fire_persona_schedule(schedule_id: str) -> None:
             # a long run hit it and died mid-flight (audit, 2026-09-21). The run
             # row exists either way, and the banner follows it.
             if not schedule.runbook_id or not schedule.runbook.is_active:
-                raise RuntimeError("the runbook this schedule starts no longer exists")
+                raise RuntimeError("the chain this schedule starts no longer exists")
             # Step 7 ruling 5: schedules stay simple. Creation already refuses a
             # checkpoint chain; this re-check catches one EDITED after scheduling.
             if runbooks.has_checkpoint(schedule.runbook):
                 raise RuntimeError("this chain waits for a person at a checkpoint — it cannot run on a schedule; run it by hand")
             if not (schedule.runbook.steps or []):
                 raise RuntimeError("this chain has no steps yet — edit it and add its steps first")
-            run = runbooks.start_run(company, project, schedule.runbook, actor, topic)
+            # Chains v2 (ruling 3): the schedule's query_text — unused by the old
+            # runbook road — now rides the run as the chain's task.
+            run = runbooks.start_run(company, project, schedule.runbook, actor, topic, query=schedule.query_text or "")
             run_runbook.delay(str(run.id))
             PersonaSchedule.objects.filter(id=schedule.id).update(
                 last_run_at=timezone.now(),

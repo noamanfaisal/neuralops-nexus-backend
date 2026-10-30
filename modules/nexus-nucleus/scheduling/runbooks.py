@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 STEPS_MAX = 12
 PROMPT_MAX = 4000
+# Chains v2: the run-time QUERY (ruling 3) shares the prompt bound; a step's
+# ROLE label (ruling 5) is a short word or two for the banner, not a prompt.
+QUERY_MAX = PROMPT_MAX
+ROLE_MAX = 60
 TITLE_MAX = 120
 DESCRIPTION_MAX = 500
 ON_FAILURE = ("stop", "skip", "retry")
@@ -52,7 +56,7 @@ def validate_steps(project, steps) -> list[dict]:
     from nucleus.models import Persona, Routine
 
     if not isinstance(steps, list) or not 1 <= len(steps) <= STEPS_MAX:
-        raise ValueError(f"A runbook has 1 to {STEPS_MAX} steps.")
+        raise ValueError(f"A chain has 1 to {STEPS_MAX} steps.")
     personas = {str(p.id) for p in Persona.objects.filter(project=project, is_active=True).only("id")}
     routines = {str(r.id) for r in Routine.objects.filter(project=project, is_active=True).only("id")}
     out = []
@@ -70,26 +74,42 @@ def validate_steps(project, steps) -> list[dict]:
                 raise ValueError(f"Step {i}: a checkpoint's on_failure is stop or skip — it has nothing to retry.")
             out.append({"kind": "checkpoint", "question": question, "on_failure": on_failure})
             continue
-        if kind != "persona":
+        if kind not in ("persona", "model"):
             raise ValueError(f"Step {i} has a kind this server does not know.")
-        persona_id = str(step.get("persona_id") or "")
-        if persona_id not in personas:
-            raise ValueError(f"Step {i} names a persona that is not in this project.")
+        # Chains v2 (ruling 5): an optional ROLE label for the banner ("Reviewer").
+        role = (step.get("role") or "").strip()
+        if len(role) > ROLE_MAX:
+            raise ValueError(f"Step {i}: a role label is at most {ROLE_MAX} characters.")
         prompt = (step.get("prompt") or "").strip()
         if not prompt or len(prompt) > PROMPT_MAX:
             raise ValueError(f"Step {i} needs a prompt of at most {PROMPT_MAX:,} characters.")
-        routine_id = step.get("routine_id") or None
-        if routine_id is not None and str(routine_id) not in routines:
-            raise ValueError(f"Step {i} names a routine that is not in this project.")
         output_type = (step.get("output_type") or "auto").strip().lower()
         if not OUTPUT_TYPE_RE.match(output_type):
             raise ValueError(f"Step {i} has an output type the worker cannot resolve.")
         on_failure = step.get("on_failure") or "stop"
         if on_failure not in ON_FAILURE:
             raise ValueError(f"Step {i}: on_failure is stop, skip or retry.")
+        if kind == "model":
+            # Chains v2 (ruling 2): a bare model + prompt — a text-only transform,
+            # no tools, no approvals. The model must be this project's to use.
+            model_id = str(step.get("model_config_id") or "")
+            if model_id not in _project_model_ids(project):
+                raise ValueError(f"Step {i} names a model that is not attached to this project.")
+            out.append({
+                "kind": "model", "model_config_id": model_id, "prompt": prompt, "role": role,
+                "output_type": output_type, "on_failure": on_failure,
+            })
+            continue
+        persona_id = str(step.get("persona_id") or "")
+        if persona_id not in personas:
+            raise ValueError(f"Step {i} names a persona that is not in this project.")
+        routine_id = step.get("routine_id") or None
+        if routine_id is not None and str(routine_id) not in routines:
+            raise ValueError(f"Step {i} names a routine that is not in this project.")
         out.append({
             "kind": "persona",
-            "persona_id": persona_id, "prompt": prompt, "routine_id": str(routine_id) if routine_id else None,
+            "persona_id": persona_id, "prompt": prompt, "role": role,
+            "routine_id": str(routine_id) if routine_id else None,
             "output_type": output_type, "on_failure": on_failure,
         })
     return out
@@ -100,12 +120,24 @@ def has_checkpoint(runbook) -> bool:
     return any((s.get("kind") or "persona") == "checkpoint" for s in (runbook.steps or []))
 
 
+def _project_model_ids(project) -> set[str]:
+    """The ids of the active models a chain's model step may use — the ones
+    attached to this project, the same reach a persona's seats have."""
+    from nucleus.models import ModelConfig
+    return {
+        str(m)
+        for m in ModelConfig.objects.filter(
+            company=project.company, is_active=True, projects=project,
+        ).values_list("id", flat=True)
+    }
+
+
 def validate_runbook_data(project, data: dict, *, partial: bool = False) -> dict:
     out = {}
     if "title" in data or not partial:
         title = (data.get("title") or "").strip()
         if not title or len(title) > TITLE_MAX:
-            raise ValueError(f"A runbook needs a title of at most {TITLE_MAX} characters.")
+            raise ValueError(f"A chain needs a title of at most {TITLE_MAX} characters.")
         out["title"] = title
     if "description" in data:
         description = (data.get("description") or "").strip()
@@ -142,6 +174,22 @@ def list_runbooks(project):
     return list(Runbook.objects.filter(project=project, is_active=True).order_by("title"))
 
 
+def chain_for_mention(project, name: str):
+    """Chains v2 (ruling 4): the chain whose title answers to an @mention token.
+    Mentions are one \\w+ word, titles have spaces — so both sides compare with
+    case and separators ignored: "@WeeklyOpsUpdate" and "@weekly_ops_update"
+    both name "Weekly ops update". Personas resolve FIRST (the caller only
+    tries names no persona answered to), so a persona never loses its name to
+    a chain. None when nothing matches — the token was just a word."""
+    wanted = re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+    if not wanted:
+        return None
+    for runbook in list_runbooks(project):
+        if re.sub(r"[^a-z0-9]+", "", runbook.title.lower()) == wanted:
+            return runbook
+    return None
+
+
 def get_runbook(project, runbook_id: str):
     from nucleus.models import Runbook
     return Runbook.objects.filter(project=project, id=runbook_id, is_active=True).first()
@@ -173,9 +221,9 @@ def delete_runbook(project, runbook_id: str) -> bool:
     return True
 
 
-def serialise_runbook(runbook, personas: dict | None = None, routines: dict | None = None) -> dict:
-    """The definition with each step's persona and routine named as they are NOW (a rename shows)."""
-    from nucleus.models import Persona, Routine
+def serialise_runbook(runbook, personas: dict | None = None, routines: dict | None = None, models: dict | None = None) -> dict:
+    """The definition with each step's persona, routine and model named as they are NOW (a rename shows)."""
+    from nucleus.models import ModelConfig, Persona, Routine
 
     steps = runbook.steps or []
     if personas is None:
@@ -184,6 +232,9 @@ def serialise_runbook(runbook, personas: dict | None = None, routines: dict | No
     if routines is None:
         ids = {s.get("routine_id") for s in steps if s.get("routine_id")}
         routines = {str(r.id): r.title for r in Routine.objects.filter(id__in=ids)} if ids else {}
+    if models is None:
+        ids = {s.get("model_config_id") for s in steps if s.get("model_config_id")}
+        models = {str(m.id): m.name for m in ModelConfig.objects.filter(id__in=ids)} if ids else {}
     return {
         "id": str(runbook.id),
         "project_id": str(runbook.project_id),
@@ -198,6 +249,7 @@ def serialise_runbook(runbook, personas: dict | None = None, routines: dict | No
                 **s,
                 "persona_name": personas.get(s.get("persona_id")),
                 "routine_title": routines.get(s.get("routine_id")) if s.get("routine_id") else None,
+                "model_name": models.get(s.get("model_config_id")) if s.get("model_config_id") else None,
             }
             for s in steps
         ],
@@ -207,16 +259,27 @@ def serialise_runbook(runbook, personas: dict | None = None, routines: dict | No
 
 
 def serialise_runbooks(runbooks: list) -> list[dict]:
-    from nucleus.models import Persona, Routine
+    from nucleus.models import ModelConfig, Persona, Routine
 
     persona_ids = {s.get("persona_id") for rb in runbooks for s in (rb.steps or []) if s.get("persona_id")}
     routine_ids = {s.get("routine_id") for rb in runbooks for s in (rb.steps or []) if s.get("routine_id")}
+    model_ids = {s.get("model_config_id") for rb in runbooks for s in (rb.steps or []) if s.get("model_config_id")}
     personas = {str(p.id): p.name for p in Persona.objects.filter(id__in=persona_ids)} if persona_ids else {}
     routines = {str(r.id): r.title for r in Routine.objects.filter(id__in=routine_ids)} if routine_ids else {}
-    return [serialise_runbook(rb, personas, routines) for rb in runbooks]
+    models = {str(m.id): m.name for m in ModelConfig.objects.filter(id__in=model_ids)} if model_ids else {}
+    return [serialise_runbook(rb, personas, routines, models) for rb in runbooks]
 
 
 # ── Runs ──────────────────────────────────────────────────────────────────────
+
+def _current_role(run) -> str:
+    """Chains v2 (ruling 5): the ROLE label of the step in progress, for the
+    banner — "step 2 of 4 — Reviewer". Empty when the step has none."""
+    steps = run.runbook.steps or []
+    if 0 <= run.current_step < len(steps):
+        return (steps[run.current_step].get("role") or "")
+    return ""
+
 
 def serialise_run(run) -> dict:
     return {
@@ -230,7 +293,9 @@ def serialise_run(run) -> dict:
         "started_by_id": str(run.started_by_id) if run.started_by_id else None,
         "started_by_name": run.started_by.get_display_name() if run.started_by else None,
         "status": run.status,
+        "query": run.query or "",
         "current_step": run.current_step,
+        "current_role": _current_role(run),
         "step_count": len(run.runbook.steps or []),
         "step_results": run.step_results or [],
         "checkpoint": run.checkpoint,
@@ -262,10 +327,35 @@ def get_run(project, run_id: str):
     return _runs(project).filter(id=run_id).first()
 
 
-def start_run(company, project, runbook, actor, topic):
-    """A queued run in `topic`; the caller enqueues the task (or executes it, from a schedule)."""
+def start_run(company, project, runbook, actor, topic, query: str = ""):
+    """A queued run in `topic`; the caller enqueues the task (or executes it, from a schedule).
+    Chains v2 (ruling 3): `query` is the task this run is about — every step sees it."""
     from nucleus.models import RunbookRun
-    return RunbookRun.objects.create(company=company, project=project, runbook=runbook, topic=topic, started_by=actor)
+    return RunbookRun.objects.create(
+        company=company, project=project, runbook=runbook, topic=topic, started_by=actor,
+        query=(query or "").strip()[:QUERY_MAX],
+    )
+
+
+def _with_query(prompt: str, query: str) -> str:
+    """Ruling 3: the run's query rides into EVERY step's prompt as the chain's
+    task — step prompts describe the method, the query says what it is about."""
+    q = (query or "").strip()
+    if not q:
+        return prompt
+    return f"The chain's task for this run:\n{q}\n\n{prompt}"
+
+
+def _run_block(run, index: int, count: int, *, step: dict | None = None, review: bool = False) -> dict:
+    """The `runbook_run` metadata a step's reply carries — the app's banner
+    reads it. Chains v2 adds the step's role label (ruling 5)."""
+    block = {"id": str(run.id), "title": run.runbook.title, "step": index + 1, "of": count}
+    role = (step or {}).get("role") or ""
+    if role:
+        block["role"] = role
+    if review:
+        block["review"] = True
+    return block
 
 
 def run_event(run) -> dict:
@@ -306,7 +396,7 @@ def stop_run(run, user) -> str:
         run.checkpoint = None
         run.ended_at = timezone.now()
         run.save(update_fields=["status", "error", "checkpoint", "ended_at", "updated_at"])
-        _announce(run, f"Runbook: {run.runbook.title} stopped by {name}" + (" while waiting at its checkpoint." if waited else " before it started."))
+        _announce(run, f"Chain: {run.runbook.title} stopped by {name}" + (" while waiting at its checkpoint." if waited else " before it started."))
         _publish_run(run)
         return "stopped"
     run.status = RunbookRun.Status.STOPPED
@@ -360,6 +450,12 @@ def _run_step(run, step: dict, index: int, count: int, context: str | None, acto
     from chat import services as chat_svc
     from nucleus.models import ChatMessage, Persona, Routine
 
+    # Chains v2 (ruling 2): a model step is a bare text transform — same
+    # (status, message id, error, content) contract, so retry/redo/review and
+    # every on_failure rule apply to it unchanged.
+    if (step.get("kind") or "persona") == "model":
+        return _run_model_step(run, step, index, count, context, prompt)
+
     persona = Persona.objects.filter(id=step["persona_id"], project=run.project, is_active=True).select_related("identity_user").first()
     if persona is None:
         return "failed", None, "its persona is no longer in the project", ""
@@ -370,12 +466,13 @@ def _run_step(run, step: dict, index: int, count: int, context: str | None, acto
             return "failed", None, "its routine is gone", ""
     msg_id = async_to_sync(chat_svc.trigger_ai_response_async)(
         company=run.company, project=run.project, topic=run.topic, persona=persona,
-        user_message=prompt if prompt is not None else step["prompt"], user_message_id=str(uuid.uuid4()), topic_id=str(run.topic_id),
+        user_message=prompt if prompt is not None else _with_query(step["prompt"], run.query),
+        user_message_id=str(uuid.uuid4()), topic_id=str(run.topic_id),
         output_type=step.get("output_type") or "auto",
         interactive=False,  # a runbook has nobody waiting to approve a plan
         routine=routine, triggered_by=actor,
         step_context=context,
-        runbook_run={"id": str(run.id), "title": run.runbook.title, "step": index + 1, "of": count},
+        runbook_run=_run_block(run, index, count, step=step),
     )
     row = ChatMessage.objects.filter(id=msg_id).first() if msg_id else None
     if row is None:
@@ -385,6 +482,95 @@ def _run_step(run, step: dict, index: int, count: int, context: str | None, acto
     if row.status == ChatMessage.Status.COMPLETED:
         return "done", msg_id, "", row.content or ""
     return "failed", msg_id, row.content or "the reply failed", ""
+
+
+def _run_model_step(run, step: dict, index: int, count: int, context: str | None, prompt: str | None) -> tuple[str, str | None, str, str]:
+    """Chains v2 (ruling 2): one bare model call through the engine's transform
+    road — no tools, no approvals, no persona. The reply posts AS THE CHAIN
+    (the chain's title is the bubble's name; the model is named in metadata)
+    and bills kind=chat_reply with the run's id riding job_id, persona_id
+    empty — exactly the owner's proposal in the ruling."""
+    from django.db.models import Max
+    from chat import services as chat_svc
+    from chat.services import NexusAIClient
+    from nucleus.models import ChatMessage, ModelConfig
+
+    cfg = ModelConfig.objects.filter(id=step["model_config_id"], company=run.company, is_active=True).first()
+    if cfg is None:
+        return "failed", None, "its model is no longer available", ""
+    text_prompt = prompt if prompt is not None else _with_query(step["prompt"], run.query)
+    if context:
+        text_prompt = f"The previous step's output:\n{context}\n\n{text_prompt}"
+    try:
+        out = NexusAIClient().transform({
+            "provider": cfg.provider, "model_id": cfg.model_id,
+            "api_key": cfg.get_api_key(), "api_base": cfg.api_base,
+            "prompt": text_prompt,
+            "max_tokens": cfg.max_output_tokens, "temperature": cfg.temperature,
+        })
+    except Exception as exc:  # noqa: BLE001 — an unreachable engine is a failed step, not a dead run
+        logger.warning("[chain] run %s step %s: the transform road failed: %s", run.id, index + 1, exc)
+        return "failed", None, "the server could not reach the model", ""
+    if not out.get("ok"):
+        logger.info("[chain] run %s step %s: model transform refused: %s", run.id, index + 1, out.get("error"))
+        return "failed", None, f"the model could not run this step ({out.get('error_code') or 'error'})", ""
+
+    text = out.get("text") or ""
+    usage = out.get("usage") or {}
+    max_seq = ChatMessage.objects.filter(topic_id=run.topic_id).aggregate(Max("sequence"))["sequence__max"] or 0
+    msg = ChatMessage.objects.create(
+        company=run.company, project=run.project, topic=run.topic,
+        sender=None,  # the chain itself speaks — no persona, no shadow user
+        content=text,
+        message_type=ChatMessage.MessageType.TEXT,
+        status=ChatMessage.Status.COMPLETED,
+        sequence=max_seq + 1,
+        metadata={
+            "role": "assistant",
+            "persona_name": run.runbook.title,          # the bubble's display name
+            "chain_step": True,
+            "model_name": cfg.name,
+            "render_as": "text", "output_type": "text",
+            "usage": {"prompt_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens"),
+                      "context_window": cfg.context_window},
+            "runbook_run": _run_block(run, index, count, step=step),
+        },
+    )
+    chat_svc.publish(chat_svc.topic_channel(str(run.topic_id)), chat_svc.serialise(msg))
+    _record_model_step_usage(run, cfg, str(msg.id), usage)
+    return "done", str(msg.id), "", text
+
+
+def _record_model_step_usage(run, cfg, message_id: str, usage: dict) -> None:
+    """One UsageRecord for the transform — kind=chat_reply (the ruling), the
+    run's id in job_id, persona_id empty. Billing must never fail a step."""
+    try:
+        from intelligence.pricing import price_record
+        from nucleus.models import UsageRecord
+
+        record = {
+            "company_id": str(run.company_id), "project_id": str(run.project_id),
+            "topic_id": str(run.topic_id), "persona_id": "",
+            "user_id": str(run.started_by_id) if run.started_by_id else "",
+            "message_id": message_id, "job_id": f"chain-run:{run.id}",
+            "kind": "chat_reply", "model_config_id": str(cfg.id),
+            "provider": cfg.provider, "model_id": cfg.model_id, "role": "STANDARD",
+            "provider_response_id": usage.get("provider_response_id"),
+            "source": "chain_model_step",
+            "input_tokens": int(usage.get("input_tokens") or 0),
+            "uncached_input_tokens": int(usage.get("uncached_input_tokens") or 0),
+            "cache_read_tokens": int(usage.get("cache_read_tokens") or 0),
+            "cache_write_5m_tokens": int(usage.get("cache_write_5m_tokens") or 0),
+            "cache_write_1h_tokens": int(usage.get("cache_write_1h_tokens") or 0),
+            "output_tokens": int(usage.get("output_tokens") or 0),
+            "reasoning_tokens": int(usage.get("reasoning_tokens") or 0),
+            "finish_reason": usage.get("finish_reason"),
+            "estimated": bool(usage.get("estimated")),
+            "called_at": timezone.now(),
+        }
+        UsageRecord.objects.create(**{**record, **price_record(record)})
+    except Exception:  # noqa: BLE001
+        logger.exception("[chain] run %s: could not record the model step's usage", run.id)
 
 
 def execute_run(run_id: str) -> None:
@@ -418,7 +604,7 @@ def execute_run(run_id: str) -> None:
         _end(
             run, RunbookRun.Status.FAILED,
             error=f"The server stopped driving this run: {type(exc).__name__}",
-            line=f"Runbook: {run.runbook.title} stopped unexpectedly — the server could not carry it to the end.",
+            line=f"Chain: {run.runbook.title} stopped unexpectedly — the server could not carry it to the end.",
         )
         raise
 
@@ -447,13 +633,17 @@ def _drive(run) -> None:
     else:
         reason = None
     if reason:
-        _end(run, RunbookRun.Status.FAILED, error=f"Did not start: {reason}.", line=f"Runbook: {title} did not start — {reason}.")
+        _end(run, RunbookRun.Status.FAILED, error=f"Did not start: {reason}.", line=f"Chain: {title} did not start — {reason}.")
         return
 
     if resuming:
-        _announce(run, f"Runbook: {title} continuing at step {start + 1} of {count}.")
+        _announce(run, f"Chain: {title} continuing at step {start + 1} of {count}.")
     else:
-        _announce(run, f"Runbook: {title} started by {actor.get_display_name()} — {count} steps.")
+        # Ruling 3: the run's task is part of the start line, so the chat says
+        # what this run is ABOUT, not only which chain ran.
+        task = (run.query or "").strip()
+        task_line = f" Task: {task[:200]}" if task else ""
+        _announce(run, f"Chain: {title} started by {actor.get_display_name()} — {count} steps.{task_line}")
     _publish_run(run)
 
     # Ruling 2: the one optional supervisor. A retired/removed supervisor stops
@@ -469,6 +659,11 @@ def _drive(run) -> None:
     names = {str(p.id): p.name for p in Persona.objects.filter(
         project=run.project, id__in={s["persona_id"] for s in steps if s.get("persona_id")},
     )}
+    # Chains v2 (ruling 2): model steps name their model in the step results.
+    from nucleus.models import ModelConfig
+    model_names = {str(m.id): m.name for m in ModelConfig.objects.filter(
+        company=run.company, id__in={s["model_config_id"] for s in steps if s.get("model_config_id")},
+    )}
     context: str | None = (run.context or "").strip() or None
     for index in range(start, count):
         step = steps[index]
@@ -477,7 +672,7 @@ def _drive(run) -> None:
         if fresh == RunbookRun.Status.STOPPED:
             run.refresh_from_db(fields=["error"])
             how = (run.error[0].lower() + run.error[1:]) if run.error else "stopped"
-            _end(run, RunbookRun.Status.STOPPED, line=f"Runbook: {title} {how} after step {index} of {count}.")
+            _end(run, RunbookRun.Status.STOPPED, line=f"Chain: {title} {how} after step {index} of {count}.")
             return
         run.current_step = index
         run.save(update_fields=["current_step", "updated_at"])
@@ -489,14 +684,14 @@ def _drive(run) -> None:
             run.checkpoint = {"index": index, "question": step["question"], "asked_at": timezone.now().isoformat()}
             run.status = RunbookRun.Status.WAITING
             run.save(update_fields=["checkpoint", "status", "updated_at"])
-            _announce(run, f"Runbook: {title} is waiting for a person at step {index + 1} of {count} — {step['question']}")
+            _announce(run, f"Chain: {title} is waiting for a person at step {index + 1} of {count} — {step['question']}")
             _publish_run(run)
             return
 
         attempts = 0
         redos = 0
         verdict = None
-        prompt = step["prompt"]
+        prompt = _with_query(step["prompt"], run.query)
         started = timezone.now()
         while True:
             attempts += 1
@@ -511,7 +706,7 @@ def _drive(run) -> None:
             if verdict == "redo" and redos < redo_allowed:
                 redos += 1
                 prompt = (
-                    f"{step['prompt']}\n\nThe reviewer asked for changes — redo this step and address these notes:\n"
+                    f"{_with_query(step['prompt'], run.query)}\n\nThe reviewer asked for changes — redo this step and address these notes:\n"
                     f"{(notes or '')[:NOTES_CLIP]}"
                 )
                 continue
@@ -521,7 +716,11 @@ def _drive(run) -> None:
                 error = "the reviewer did not pass this step" + (f": {first_line}" if first_line else "")
             break
         result = {
-            "index": index, "persona_id": step["persona_id"], "persona_name": names.get(step["persona_id"]),
+            "index": index, "kind": step.get("kind") or "persona",
+            "persona_id": step.get("persona_id"), "persona_name": names.get(step.get("persona_id")),
+            "model_config_id": step.get("model_config_id"),
+            "model_name": model_names.get(step.get("model_config_id")),
+            "role": step.get("role") or "",
             "message_id": msg_id, "status": status, "attempts": attempts,
             "started_at": started.isoformat(), "ended_at": timezone.now().isoformat(), "error": error,
         }
@@ -540,16 +739,16 @@ def _drive(run) -> None:
             continue
         if status == "stopped":
             run.refresh_from_db(fields=["error"])
-            _end(run, RunbookRun.Status.STOPPED, line=f"Runbook: {title} stopped at step {index + 1} of {count}.")
+            _end(run, RunbookRun.Status.STOPPED, line=f"Chain: {title} stopped at step {index + 1} of {count}.")
             return
         if step.get("on_failure") == "skip":
             continue  # the next step sees the last GOOD output
-        _end(run, RunbookRun.Status.FAILED, error=f"Failed at step {index + 1} of {count}: {error}", line=f"Runbook: {title} failed at step {index + 1} of {count} — {error}")
+        _end(run, RunbookRun.Status.FAILED, error=f"Failed at step {index + 1} of {count}: {error}", line=f"Chain: {title} failed at step {index + 1} of {count} — {error}")
         return
 
     # "finished" on its own would hide a skipped step from everyone reading the chat.
     skipped = skipped_count(run)
-    _end(run, RunbookRun.Status.DONE, line=f"Runbook: {title} finished — {count} steps" + (f", {skipped} skipped." if skipped else "."))
+    _end(run, RunbookRun.Status.DONE, line=f"Chain: {title} finished — {count} steps" + (f", {skipped} skipped." if skipped else "."))
 
 
 # ── The supervisor (Step 7, rulings 2+3) ───────────────────────────────
@@ -578,8 +777,11 @@ def _review(run, supervisor, step: dict, content: str, actor, index: int, count:
     # perfectly fine work twice — against its own taste, not against the goal —
     # and the capped run failed): the reviewer judges whether the stage DID ITS
     # JOB, never whether it matches how the reviewer would have done it.
+    task = (run.query or "").strip()
+    task_line = f"The chain's task for this run:\n{task[:1000]}\n\n" if task else ""
     question = (
         f"You are the reviewer of a chain stage that just finished (step {index + 1} of {count}).\n"
+        f"{task_line}"
         f"The stage's goal:\n{step['prompt'][:1000]}\n\n"
         f"The stage's reply:\n{(content or '')[:REVIEW_CLIP]}\n\n"
         "Start your reply with exactly one word on its own line — APPROVE, REDO or FAIL — "
@@ -598,14 +800,14 @@ def _review(run, supervisor, step: dict, content: str, actor, index: int, count:
             output_type="text",
             interactive=False,  # a review never raises a question card
             triggered_by=actor,
-            runbook_run={"id": str(run.id), "title": run.runbook.title, "step": index + 1, "of": count, "review": True},
+            runbook_run=_run_block(run, index, count, review=True),
         )
         row = ChatMessage.objects.filter(id=msg_id).first() if msg_id else None
     except Exception:  # noqa: BLE001 -- a broken reviewer must not kill the chain
         logger.exception("[runbook] run %s: the supervisor review itself failed", run.id)
         row = None
     if row is None or row.status != ChatMessage.Status.COMPLETED:
-        _announce(run, f"Runbook: {run.runbook.title} — the reviewer could not review step {index + 1}; the step stands.")
+        _announce(run, f"Chain: {run.runbook.title} — the reviewer could not review step {index + 1}; the step stands.")
         return "unreviewed", ""
     return _parse_verdict(row.content or "")
 
@@ -656,7 +858,7 @@ def answer_checkpoint(run, user, answer: str):
     run.current_step = index + 1
     run.status = RunbookRun.Status.QUEUED
     run.save(update_fields=["step_results", "context", "checkpoint", "current_step", "status", "updated_at"])
-    _announce(run, f"Runbook: {run.runbook.title} — {name} answered the checkpoint; continuing.")
+    _announce(run, f"Chain: {run.runbook.title} — {name} answered the checkpoint; continuing.")
     _publish_run(run)
     run_runbook.delay(str(run.id))
     return run
@@ -689,11 +891,11 @@ def expire_waiting_run(run) -> None:
     if step.get("on_failure") == "skip":
         run.current_step = index + 1
         run.save(update_fields=["step_results", "checkpoint", "current_step", "updated_at"])
-        _announce(run, f"Runbook: {run.runbook.title} — the checkpoint expired with no answer; skipping it.")
+        _announce(run, f"Chain: {run.runbook.title} — the checkpoint expired with no answer; skipping it.")
         _publish_run(run)
         run_runbook.delay(str(run.id))
         return
     run.save(update_fields=["step_results", "checkpoint", "updated_at"])
     _end(run, RunbookRun.Status.FAILED,
          error="The checkpoint expired — nobody answered within 24 hours.",
-         line=f"Runbook: {run.runbook.title} failed — its checkpoint expired with nobody answering.")
+         line=f"Chain: {run.runbook.title} failed — its checkpoint expired with nobody answering.")

@@ -314,6 +314,11 @@ class RunbookRun(ProjectBaseModel):
 
     runbook = models.ForeignKey(Runbook, on_delete=models.CASCADE, related_name="runs")
     topic = models.ForeignKey("nucleus.ChatTopic", on_delete=models.CASCADE, related_name="runbook_runs")
+    # Chains v2 (1.1.0, ruling 3): the QUERY this run was started with — the
+    # chain's task. It rides into step 1's prompt and every later step (and the
+    # supervisor's review) sees it, so one chain is a reusable workflow, not a
+    # frozen script. Empty = run the steps as written (every pre-1.1.0 run).
+    query = models.TextField(blank=True, default="")
     started_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="started_runbook_runs",
     )

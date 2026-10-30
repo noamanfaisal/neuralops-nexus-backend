@@ -375,12 +375,15 @@ class PydanticAISystem:
             # more, but the partial usage must still land. Shield the write so
             # the cancellation doesn't take it down with the run.
             await self._record_usage(shielded=True)
+            await self._record_audit(job, retrieved_refs, shielded=True)
             raise
         except Exception:
             await self._record_usage()
+            await self._record_audit(job, retrieved_refs)
             raise  # EventStream turns this into exactly one message_error
         else:
             await self._record_usage()
+            await self._record_audit(job, retrieved_refs)
             pause = self._generator.pause_info()
             used = self._generator.used_tools()
             if pause is not None:
@@ -528,6 +531,57 @@ class PydanticAISystem:
                 raise
         except Exception:
             log.exception("record_usage failed for job %s", records[0].job_id)
+
+    async def _record_audit(self, job: TriggerJob, retrieved_refs: list[RetrievedRef],
+                            shielded: bool = False) -> None:
+        """1.3.0 AI audit log: one nucleus record per model RUN of this reply —
+        the prompt anatomy the generator captured, plus what retrieval added.
+        Same endings and same failure rule as _record_usage: logged, never
+        raised — a good reply stays good."""
+        audits = self._generator.audits()
+        if not audits:
+            return
+        retrieval = [{"label": r.label, "score": r.score, "kind": r.kind}
+                     for r in retrieved_refs]
+        entries = [{
+            "job_id": job.job_id,
+            "msg_id": job.msg_id,
+            "persona_id": job.persona_id,
+            "model_id": a.get("model_id", ""),
+            "provider": a.get("provider", ""),
+            "prompt": [],  # legacy field — the anatomy lives in breakdown
+            "response": a.get("response", ""),
+            "prompt_tokens": a.get("prompt_tokens", 0),
+            "completion_tokens": a.get("completion_tokens", 0),
+            "latency_ms": a.get("latency_ms", 0),
+            "status": a.get("status", "done"),
+            "error": a.get("error"),
+            "topic_id": job.topic_id,
+            "project_id": job.project_id,
+            "role": a.get("role", ""),
+            "model_name": a.get("model_name", ""),
+            "breakdown": {
+                "sections": a.get("sections", []),
+                "extra_instructions": a.get("extra_instructions", ""),
+                "history_count": a.get("history_count", 0),
+                "message": a.get("message", ""),
+                "retrieval": retrieval,
+                "resume": a.get("resume", False),
+                "fallback_attempt": a.get("fallback_attempt", 0),
+                "started_at": a.get("started_at", ""),
+            },
+        } for a in audits]
+        try:
+            call = self._nucleus.record_request_log(entries)
+            if shielded:
+                await asyncio.shield(asyncio.ensure_future(call))
+            else:
+                await call
+        except asyncio.CancelledError:
+            if not shielded:
+                raise
+        except Exception:
+            log.exception("audit log write failed for job %s", job.job_id)
 
 
 def _now() -> str:

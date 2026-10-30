@@ -418,6 +418,35 @@ class AIRequestLogOut(Schema):
     created_at: str
 
 
+# ── AI audit log (1.3.0) ──────────────────────────────────────────────────────
+# One row per model RUN of a reply (a router hand-over or fallback writes two).
+# The summary row is what the topic list shows; `breakdown` (the prompt
+# anatomy: sections, history, message, retrieval, extra instructions) and the
+# raw response ride only on the detail shape, so a 200-row listing stays light.
+
+class AuditEntryOut(Schema):
+    id: str
+    created_at: str
+    msg_id: str
+    topic_id: str = ""
+    persona_id: Optional[str] = None
+    persona_name: str = ""
+    role: str = ""                 # seat: router / standard / deep
+    provider: str
+    model_id: str
+    model_name: str = ""
+    status: str
+    latency_ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    error: Optional[str] = None
+
+
+class AuditEntryDetailOut(AuditEntryOut):
+    breakdown: dict = {}
+    response: str = ""
+
+
 # ── CompanyAIConfig ───────────────────────────────────────────────────────────
 
 class CompanyAIConfigIn(Schema):
@@ -472,3 +501,20 @@ class PersonaCatalogEntryOut(Schema):
     capabilities: list[str] = []
     routines: list[str] = []
     acts_after_approval: bool = False
+
+
+class ModelPresetOut(Schema):
+    """Free-LLM onboarding WP1: one "Free to start" tile for /add-model —
+    everything pre-filled except the key, which the person brings. Honesty
+    notes travel with the data so the UI never softens them."""
+    id: str
+    title: str
+    provider: str
+    api_base: Optional[str] = None
+    model_ids: list[str] = []
+    key_page: str
+    key_hint: str = ""
+    rate_note: str = ""
+    data_note: str = ""
+    needs_key: bool = True
+    private: bool = False

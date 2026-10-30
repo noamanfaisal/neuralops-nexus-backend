@@ -5,7 +5,7 @@ from django.urls import path
 from ninja import NinjaAPI
 
 from authn.api import me_router, roles_router, router as authn_router
-from workspace.api import router as workspace_router, members_router
+from workspace.api import router as workspace_router, members_router, files_public_router
 from chat.api import router as chat_router, search_router
 from intelligence.api import router as intelligence_router
 from intelligence.usage_api import router as usage_router, company_router as usage_company_router
@@ -37,6 +37,10 @@ api.add_router("/usage/", usage_company_router)
 # Public on purpose (W12): the token in the path is the credential. nginx does
 # not block it -- an inbound hook is only useful from outside.
 api.add_router("/hooks/", hooks_router)
+# Public on purpose (file viewer part 2): a one-use, 60-second download ticket
+# is the credential -- minted by an authenticated project read, usable by the
+# browser's own download manager (no header to carry).
+api.add_router("/files/", files_public_router)
 # Step 6: the MCP gateway (this server as a tool) + its personal tokens.
 api.add_router("/mcp", mcp_router)
 api.add_router("/gateway/tokens/", tokens_router)

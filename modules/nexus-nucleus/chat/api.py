@@ -108,6 +108,46 @@ def _refuse(personas: list, code: str, message: str) -> list[dict]:
     return [{"persona_id": str(p.id), "name": p.name, "code": code, "message": message, "resets_at": None} for p in personas]
 
 
+def _start_chains_sync(company, project, topic, user, names: list[str], query: str) -> tuple[list[str], list[dict]]:
+    """
+    Chains v2 (ruling 4): "@ChainName <query>" in chat. Each name no persona
+    answered to is tried against the project's chains; a match starts that
+    chain HERE, with the rest of the message as the run's query. The door is
+    the ruling's "project admin/owner" — runbook.manage, the define right —
+    plus the right to call personas here (a run is a series of mentions).
+    Returns (started chain titles, refusals in the mention_refused shape).
+    """
+    from scheduling import runbooks as runbook_svc
+    from scheduling.tasks import run_runbook
+
+    started: list[str] = []
+    refusals: list[dict] = []
+
+    def refuse(chain, message):
+        refusals.append({"persona_id": str(chain.id), "name": chain.title, "code": "no_right",
+                         "message": message, "resets_at": None})
+
+    for name in names:
+        chain = runbook_svc.chain_for_mention(project, name)
+        if chain is None:
+            continue  # the token was just a word
+        if not (PermissionChecker.can(user, "runbook.manage", obj=project)
+                and PermissionChecker.can(user, "persona.mention", obj=topic)):
+            refuse(chain, "Only a project admin may start a chain from chat.")
+            continue
+        if not (chain.steps or []):
+            refuse(chain, "This chain has no steps yet — edit it and add its steps first.")
+            continue
+        run = runbook_svc.start_run(company, project, chain, user, topic, query=query)
+        run_runbook.delay(str(run.id))
+        started.append(chain.title)
+        logger.info("[chat/api] chain mention started chain=%s run=%s by=%s", chain.title, run.id, user.id)
+    return started, refusals
+
+
+_start_chains = sync_to_async(_start_chains_sync)
+
+
 def _get_session_timeout_sync(company) -> int:
     """Return session_timeout_minutes from company AI config, or default 30."""
     try:
@@ -240,8 +280,10 @@ async def send_message(
     centrifugo_channel = chat_svc.topic_channel(topic_id)
     asyncio.create_task(chat_svc.publish_async(centrifugo_channel, msg))
 
-    # 5. Resolve @mentions to Persona objects (parallel)
+    # 5. Resolve @mentions to Persona objects (parallel). Names no persona
+    #    answers to are kept: one of them may name a CHAIN (Chains v2, 5c2).
     mentioned_personas = []
+    unmatched_names: list[str] = []
     for name in directives.mention_names:
         # Personas are project-owned -- scoped to this topic's project, not
         # the whole company (see intelligence/services.py:get_persona_by_mention).
@@ -249,6 +291,8 @@ async def send_message(
         if p:
             mentioned_personas.append(p)
             logger.info("[chat/api] mention=%s resolved persona=%s", name, p)
+        else:
+            unmatched_names.append(name)
 
     # 5b. The right to call personas here. persona.mention is TOPIC-scoped, so
     #     one check covers every persona in this message. Refused ones are
@@ -269,6 +313,17 @@ async def send_message(
     if directives.routine_name:
         routine = await _get_routine_by_name(project, directives.routine_name)
     clean_message = directives.message_without_routine if routine else directives.clean_message
+
+    # 5c2. Chains v2 (ruling 4): "@ChainName <query>". Personas took their
+    #      names first (step 5); what is left is tried against the project's
+    #      chains, and the message minus its @mentions rides as the query.
+    started_chains: list[str] = []
+    chain_refusals: list[dict] = []
+    if unmatched_names:
+        started_chains, chain_refusals = await _start_chains(
+            company, project, topic, user, unmatched_names,
+            directives.message_without_mentions(clean_message),
+        )
 
     # 6. Apply session routing priority
 
@@ -329,8 +384,10 @@ async def send_message(
                                             topic_id, msg, clean_message,
                                             directives.output_type, routine, user) or refusals
 
-    else:
-        # Rules 4 + 5: no explicit mention — check session
+    elif not started_chains:
+        # Rules 4 + 5: no explicit mention — check session. A message that
+        # STARTED A CHAIN is treated like a mention (rule 3): the chain's own
+        # steps answer it; the session's personas are not fired on top.
         active_session = await _get_active_session(user.id, topic.id)
         if active_session:
             # Rule 4: session active — trigger all session personas. The
@@ -349,6 +406,9 @@ async def send_message(
                                                     directives.output_type, routine, user) or refusals
         # Rule 5: no mention, no session — human-only message, nothing to do
 
+    # A chain refusal is ADDITIVE — the routing above may have replaced
+    # `refusals` with the trigger's own, and both belong to the sender.
+    refusals = [*refusals, *chain_refusals]
     if refusals:
         asyncio.create_task(chat_svc.publish_async(
             centrifugo_channel, mention_refused_event(msg["id"], str(user.id), refusals),

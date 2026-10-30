@@ -210,3 +210,32 @@ async def test_l1_toolless_persona_is_plain_layer0(harness):
     names = [t["function"]["name"] for t in body.get("tools", [])]
     assert names == ["ask_user"]
     assert "Tools available" not in json.dumps(body["messages"])
+
+
+async def test_suggest_attach_names_the_projects_other_servers(harness):
+    """MCP suggest-attach (owner's "option 2", ruled 2026-10-22) — the persona
+    SEES the names + one-liners of the project's OTHER servers in its
+    instructions, points at the human attach road, and gets NO tool from them.
+    Found live: "what shopping tools do you have?" → "none" while Shopping
+    (demo) sat one tick away. A persona with none gets no section at all."""
+    persona = make_persona(openai_model(harness), other_servers=[
+        {"name": "Shopping (demo)", "description": "Products, carts and orders in the demo shop."},
+        {"name": "Warehouse"},
+    ])
+    harness.nucleus.persona = persona
+    events = await harness.trigger()
+    assert [e for e in events if e["type"] == "message_done"]
+    body = harness.provider.requests[-1]
+    messages = json.dumps(body["messages"])
+    assert "NOT attached to you" in messages
+    assert "Shopping (demo): Products, carts and orders in the demo shop." in messages
+    assert "- Warehouse" in messages
+    assert "persona-edit rights" in messages
+    # Names only — their tools never become callable (item 5's ask_user is all).
+    names = [t["function"]["name"] for t in body.get("tools", [])]
+    assert names == ["ask_user"]
+
+    # No other servers (an older nucleus too): no section, stream untouched.
+    harness.nucleus.persona = make_persona(openai_model(harness))
+    await harness.trigger(harness.job(msg_id="msg-2", job_id="job-2"))
+    assert "NOT attached to you" not in json.dumps(harness.provider.requests[-1]["messages"])

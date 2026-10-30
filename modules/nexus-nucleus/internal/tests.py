@@ -40,6 +40,69 @@ class TopicHistoryInternalTests(MentionRightFixture):
         self.assertEqual(r.status_code, 401)
 
 
+class SuggestAttachInternalTests(MentionRightFixture):
+    """MCP suggest-attach (owner's "option 2", ruled 2026-10-22): the internal
+    persona payload names the PROJECT's other external servers — name + one
+    line and NOTHING else — so the engine can say "this project has X;
+    someone with edit rights can attach it" without ever being able to reach
+    one. Found live: "what shopping tools do you have?" → "none" while
+    Shopping (demo) sat one tick away."""
+
+    def persona_internal(self):
+        # The internal endpoint 400s a persona without a prompt row — the
+        # fixture's personas carry none (same seeding as PersonaInternalBriefTests).
+        from nucleus.models import Prompt
+        Prompt.objects.get_or_create(persona=self.persona_sara, defaults={"company": self.company, "system_prompt": "You are Sara.", "output_type": "text"})
+        with patch.dict(os.environ, {"INTERNAL_API_KEY": "k"}):
+            r = Client().get(f"/api/v1/internal/personas/{self.persona_sara.id}/", HTTP_X_INTERNAL_API_KEY="k")
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    def test_other_servers_ride_as_names_and_one_liners_only(self):
+        from nucleus.models import MCPServer
+
+        MCPServer.objects.create(
+            company=self.company, project=self.p1, name="Shopping (demo)",
+            description="Products, carts and orders in the demo shop.",
+            transport="http", url="http://shop.example/mcp",
+        )
+        attached = MCPServer.objects.create(
+            company=self.company, project=self.p1, name="GitHub",
+            transport="http", url="http://gh.example/mcp",
+        )
+        self.persona_sara.mcp_servers.add(attached)
+        # Another project's server must never leak across; an internal
+        # capability row is not a suggestion either (it has no server to attach).
+        MCPServer.objects.create(
+            company=self.company, project=self.p2, name="Elsewhere",
+            transport="http", url="http://e.example/mcp",
+        )
+        MCPServer.objects.create(
+            company=self.company, project=self.p1, name="defaults",
+            is_internal=True, auth_type="none", capability_config={"web_search": {}},
+        )
+
+        data = self.persona_internal()
+        self.assertEqual(data["other_servers"], [
+            {"name": "Shopping (demo)", "description": "Products, carts and orders in the demo shop."},
+        ])
+        # The attached one rides mcp_servers as always — never suggested again.
+        self.assertIn("GitHub", [s["name"] for s in data["mcp_servers"]])
+        # A suggestion is name + one line, and nothing else — no url, no
+        # transport, no secrets, no tools (the schema pins the shape).
+        self.assertEqual(set(data["other_servers"][0]), {"name", "description"})
+
+    def test_a_persona_with_every_server_attached_suggests_nothing(self):
+        from nucleus.models import MCPServer
+
+        server = MCPServer.objects.create(
+            company=self.company, project=self.p1, name="GitHub",
+            transport="http", url="http://gh.example/mcp",
+        )
+        self.persona_sara.mcp_servers.add(server)
+        self.assertEqual(self.persona_internal()["other_servers"], [])
+
+
 class InternalBodySizeTests(MentionRightFixture):
     """The 64 KB pause bug (docs/MISSING.md, found live 2026-10-27): the global
     DATA_UPLOAD_MAX_MEMORY_SIZE capped every engine→nucleus POST, and a pause
@@ -96,8 +159,10 @@ class InternalBodySizeTests(MentionRightFixture):
             {"message_id": f"m-{i}", "job_id": f"j-{i}", "kind": "chat_reply",
              "provider": "openai", "model_id": "gpt-test", "role": "STANDARD",
              "input_tokens": 1000, "output_tokens": 50, "called_at": called_at,
-             "source": "s" * 400}
-            for i in range(300)
+             # source is a varchar(50) — stay within the REAL column; the body
+             # gets its size from the record count, not from an oversized field.
+             "source": "s" * 50}
+            for i in range(1000)  # ~240 bytes each ≈ 235 KB on the wire
         ]
         body = json.dumps({"records": records})
         self.assertGreater(len(body), 200 * 1024)  # the point of the test
@@ -105,8 +170,8 @@ class InternalBodySizeTests(MentionRightFixture):
             r = Client().post("/api/v1/internal/usage/", data=body,
                               content_type="application/json", HTTP_X_INTERNAL_API_KEY="k")
         self.assertEqual(r.status_code, 201, r.content[:300])
-        self.assertEqual(r.json()["saved"], 300)
-        self.assertEqual(UsageRecord.objects.count(), 300)
+        self.assertEqual(r.json()["saved"], 1000)
+        self.assertEqual(UsageRecord.objects.count(), 1000)
 
 
 class PersonaInternalBriefTests(MentionRightFixture):

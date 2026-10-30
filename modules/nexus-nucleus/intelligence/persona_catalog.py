@@ -101,10 +101,35 @@ PERSONA_CATALOG = [
 ]
 
 
+def helper_entry() -> dict:
+    """
+    Free-LLM onboarding WP2 (owner's work order 2026-10-23): the configure-
+    channel setup helper. Built HERE, at read time, because its prompt is
+    RENDERED from intelligence/model_presets.py — the provider list is never
+    hardcoded in prompt text, so a preset edit updates what newly created
+    helpers know. No capabilities on purpose: it guides and verifies; the
+    register-model tool (WP3) arrives with the setup copilot.
+    """
+    from intelligence import model_presets
+
+    return {
+        "id": "setup-helper",
+        "name": "Guide",
+        "role": "From zero to a working free model",
+        "purpose": "Walks a new deployment to its first working model — free tiers first, honestly, keys never in chat.",
+        "system_prompt": model_presets.helper_prompt(),
+        "capabilities": [],
+        "routines": [],
+        "acts_after_approval": False,
+    }
+
+
 def catalog() -> list[dict]:
     """The catalogue as the app reads it. A copy, so a caller cannot edit the module."""
-    return [dict(entry) for entry in PERSONA_CATALOG]
+    return [dict(entry) for entry in PERSONA_CATALOG] + [helper_entry()]
 
 
 def entry(entry_id: str) -> dict | None:
+    if entry_id == "setup-helper":
+        return helper_entry()
     return next((dict(e) for e in PERSONA_CATALOG if e["id"] == entry_id), None)

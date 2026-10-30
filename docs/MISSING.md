@@ -127,9 +127,15 @@ DEMO-SERVICE.md + DEMO-DNS-HOSTINGER.md.
 
 **FILE VIEWER — OPEN WORK (spec: docs/FILE-VIEWER-PANE.md; the nucleus
 browse/download/view endpoints are BUILT and tested, see §3):**
-- [ ] Part 1 — **Files pane** in the web app: breadcrumb + list, refresh,
-  view (`iframe srcdoc` + `sandbox`, no allow-scripts), download (authorised
-  fetch → blob), worded 400/404/409/413/415. Frontend only.
+- [x] Part 1 — **Files pane**: BUILT 2026-10-29 (G1). Fifth pane in the rail
+  (minServer 1.0.0 — an older server gets no pane): breadcrumb + list
+  (folders first, human sizes, relative age, truncated note), Refresh, view
+  in `iframe srcdoc` + `sandbox=""` (no allow-scripts — pinned by test; the
+  server's CSP header doesn't ride into srcdoc), authorised blob download,
+  worded 409 ("no folder yet") / 413 / 415 (sentence + Download button) and
+  empty states. Files: `lib/api/files.ts`, `components/shell/files-pane.tsx`
+  (+ its test file), `pane-ids.ts`, `pane-defs.tsx` (+ test updated to five
+  panes); TESTER-GUIDE T-04/T-44 updated.
 - [ ] Part 2 — one-time **download tickets** (60 s, single use) for big
   files + **file chips** in chat when a persona writes a file.
 - [ ] Part 3 — **upload** (new `project.files_write` right, own size limit,
@@ -733,6 +739,57 @@ lesson 14) and rebuild the image — fold into the next image build.
   retrieved_sources on message_done — the build is capturing the full prompt
   /retrieval payload per reply, a permission-gated API (owner/admin only —
   this is reading people's chats, needs its own right), and the viewer UI.
+  **BUILT 2026-10-29 (1.3.0, the owner's 19:14 ask: "i want to know in log…
+  how every prompt is building, vector db + system prompt + context +
+  file"). "Investigate with a model" is EXPLICITLY DEFERRED — it rides the
+  setup-copilot week, where a model gets tools.**
+  · CAPTURE (engine): ReplyGenerator records one audit dict per model RUN
+  (reply_generator.py — a fallback or router→deep hand-over writes two): the
+  plan's sections POST-FIT with kind + chars + FULL text (capped 20k/field —
+  system prompt, project brief, output contract, tool catalog, other
+  servers, retrieved, approved plan, step context), the extra instructions
+  (router bench / hand-over note, now split from the base so the log names
+  them), history count, the user message, seat/provider/model, resume flag,
+  fallback attempt, per-run token sums and latency, and the ending as it
+  really was: done / escalated / paused / failed / cancelled. ai_system
+  `_record_audit` posts them at the SAME three endings as usage (success,
+  error, shielded cancel), attaching the retrieval refs (label+score+kind);
+  a failed write is logged, never breaks a reply.
+  NucleusClient.record_request_log → the EXISTING internal
+  POST /ai-request-logs/ (the legacy endpoint the new engine never used).
+  · STORE (nucleus): AIRequestLog gains topic_id (indexed), project FK,
+  role, model_name, breakdown JSON — migration **0045_audit_anatomy**; the
+  internal route saves them (an older engine's plain write still lands).
+  · READ (nucleus): NEW right **project.audit** (Admin bundle only — this is
+  reading everyone's prompts and raw model output); `GET
+  /projects/{id}/audit/` (topic_id / msg_id filters, cap 200, light summary
+  rows) + `GET /projects/{id}/audit/{log_id}/` (full breakdown + raw
+  response). HOLE CLOSED riding along: the legacy company-wide
+  `GET /ai-request-logs/` was auth-only — ANY signed-in member could read
+  every raw prompt/response; now gated on project.audit at company reach.
+  · UI: a hover action on every persona reply ("How this reply was built",
+  only with the right — canAudit rides TopicView→MessageList like canDecide)
+  and a Context-pane action ("How replies here are built") for the TOPIC
+  view — both open audit-dialog.tsx: one card per run (seat, model, status,
+  @persona, tokens in/out, latency, time), unfolding to the anatomy — each
+  ingredient a named collapsible with char count and full text, the vector-DB
+  retrieval list with scores, history count / resume / fallback line, the
+  message answered and the raw response. Detail fetched per run on first
+  unfold.
+  TESTS: engine tests/test_audit.py (plain reply anatomy incl. tool_catalog
+  + persona prompt text; escalation = ROUTER escalated + DEEP done rows with
+  the hand-over note in extra_instructions; a dead-endpoint run still lands
+  as failed with the anatomy intact); nucleus intelligence/tests.py
+  AuditLogTests (internal write incl. the older-engine shape, owner reads /
+  Member 403 on list+detail, topic/msg filters, cross-project invisibility,
+  the legacy listing now 403s a Member); frontend context-panel.test
+  (no right = no action; the topic view's run unfolds to prompt text,
+  retrieval scores, message, response), message-list.test (hover action only
+  with canAudit and only on persona replies), test/permissions ALL_RIGHTS +
+  project.audit.
+  OWNER: `manage.py migrate` (0045) + `manage.py seed_permissions`
+  (project.audit → Admin/Owner) ride the next round; restart BOTH
+  containers (engine now writes the log).
 - **Connector tiles with icons.** The add-MCP screen shows ready-made tiles
   (icon + one click to configure) for: GitHub, Bitbucket, a graph-DB context
   MCP, Atlassian, AWS, Google, Vercel, draw.io/charts (owner's list, extended
@@ -740,12 +797,111 @@ lesson 14) and rebuild the image — fold into the next image build.
   mcp_catalog already pre-fills dialogs; the build is catalog entries with
   icons + tile UI + per-service oauth_config defaults, each entry TESTED
   against the real service.
-- **Backup & restore.** Owner's scope to confirm at build time (proposed:
-  one command dumps DB + uploaded media; secrets.env stays out by the
-  append-only rule; one command restores onto a fresh install).
+  **BUILT 2026-10-29 (code side; LIVE VERIFICATION IS THE OWNER'S HALF).**
+  The tile UI + brand marks existed (W11 Catalogue + brand-icons); this round
+  added the five missing entries to intelligence/mcp_catalog.py —
+  **bitbucket** (community `@aashari/mcp-server-atlassian-bitbucket`, stdio,
+  workspace + Atlassian API token), **neo4j** (official
+  `uvx mcp-neo4j-cypher`, the graph-context option), **aws** (AWS Labs
+  `uvx awslabs.aws-api-mcp-server@latest`, credentials-scoped; NEW
+  "Infrastructure" category), **vercel** (hosted https://mcp.vercel.com,
+  oauth2 via the dynamic-registration road — no preset needed) and
+  **mermaid** (`npx -y mcp-mermaid` — the draw.io/charts ask; the chat
+  renders Mermaid natively). Frontend: brand marks for
+  bitbucket/neo4j/vercel/mermaid (simple-icons 16); AWS has NO mark there
+  (brand takedown, like Slack — but its geometry isn't reproducible) so it
+  wears a house Cloud glyph; brand-icons test pins the new list + the AWS
+  rule. OWNER before release: add each tile's server against the REAL
+  service once (the ruling demands it — package names rot); GitHub/Google
+  Drive/Atlassian oauth_presets still await the vendor app client_ids
+  (portal-side, unchanged).
+- **Backup & restore.**
+  **BUILT 2026-10-29 night (CLI side; the owner's live proof run is the
+  other half).** `neuralops backup` already existed (database.sql.gz via
+  pg_dumpall · secrets.env · projects.tar.gz — secrets are IN the backup on
+  purpose: without FIELD_ENCRYPTION_KEY the restored model keys are
+  unreadable). NEW: **`neuralops restore <backup folder>`**
+  (neuralops-cli.sh cmd_restore): validates the folder, then — append-only
+  secrets rule — a fresh install takes the backup's secrets, matching
+  secrets pass silently, DIFFERENT secrets refuse loudly (the DB would be
+  undecryptable) unless `--use-backup-secrets`, which keeps the old file
+  aside as secrets.env.replaced-<ts>; asks the person to type RESTORE;
+  stops the app services (postgres stays up), drops both databases
+  (pg_dumpall carries CREATE DATABASE), pipes the dump back in, swaps the
+  projects folder (old one kept as projects.replaced-<ts>, chown 1000),
+  then compose up + the standard setup_database (migrate/seed) so the
+  restored data is brought to the running version. Never `down -v`.
+  ALSO FIXED riding along: someone had pasted the developer-brief MESSAGE
+  ("WHAT WE'RE BUILDING … Thanks!") into the END of neuralops-cli.sh after
+  the esac — not shell, so EVERY `neuralops` command errored at exit;
+  removed. OWNER'S PROOF (no automated test can cover a live stack):
+  on a server with data → `neuralops backup` → fresh install →
+  `neuralops restore backups/neuralops-<ts>` → sign in: chats, models
+  (keys decrypt), project files all back; `bash -n` + shellcheck clean.
 - **File viewer pane (un-parked).** Browse project files with: download,
   upload, and "run as HTML server" (serve a folder/file as a live preview —
   security ruling needed: who may run it, same-origin isolation).
+  **Parts 1+2 BUILT 2026-10-29 (spec: docs/FILE-VIEWER-PANE.md §2–3).**
+  PART 1 (the pane): a **Files** pane in the rail — breadcrumb, folders
+  first, sizes/ages, Refresh, sandboxed viewer (`srcdoc` + `sandbox=""`,
+  never allow-scripts), blob downloads with the bearer, worded 400/404/409/
+  413/415. PART 2 (tickets + chat chips):
+  · **One-use download tickets** — `POST /projects/{id}/files/ticket/`
+  (same project read as every file route) answers `{url, expires_in: 60}`;
+  `GET /api/v1/files/download/{token}` is PUBLIC ON PURPOSE (the token is
+  the credential; `files_public_router` in workspace/api.py, mounted in
+  core/urls.py). One use = push at mint, pop at take, on the shared signal
+  store (Redis in prod, memory in tests); 60 s TTL; unknown/expired/reused
+  all answer the SAME 410 so a guesser learns nothing; the file having
+  vanished since the mint is the one honest 404. The pane downloads files
+  ≥200 MB by ticket (the browser streams to disk — no blob in memory);
+  smaller files keep the blob road.
+  · **File chips in chat** — the engine stamps `path` on every ok write
+  tool's tool_result (event_mapper `written_path_of`; contracts
+  ToolResultData.path); the relay collects the written paths and, at
+  message_done (stopped included), CONFIRMS them against the project
+  folder (workspace/files.stat_files — inside the wall, real sizes, dedup,
+  cap 20) and ships `files: [{path, name, size}]` on the done event and in
+  metadata (chat/messages.py serialise). The app shows one chip per file
+  under the bubble — name, size, **View** (opens the Files pane at the
+  file's folder, a one-shot ui.store target like jumpToMessage) and
+  **Download** (a FRESH ticket per click, absolutized against the server).
+  Never a long-lived link in a message.
+  TESTS: nucleus workspace/tests_files.py **DownloadTicketTests** (once-and
+  -only-once, expiry, uniform 410, minting walls: outsider 404 / `..` 400 /
+  sneaky symlink 400 / folder 400, subfolder bytes, deleted-after-mint 404)
+  + **FileChipTests** (an e2e streamed reply: write_file×2 dedup + a ghost
+  path dropped + ../ dropped, read_file never a chip; metadata + serialise +
+  the published done all carry the chips; a toolless reply ships none);
+  frontend: files-pane (big file by ticket, small file never, View-target
+  consumption), message-list (chips + View + ticket mint), message-store
+  (wire parse both roads).
+  **Part 3 (upload) BUILT 2026-10-29, same day.**
+  · `POST /projects/{id}/files/upload/` — multipart field `file`, `?path=`
+  folder + `?overwrite=true`; gated on a NEW right **project.files_write**
+  (rights.py registry — Admin + Member by default, never Viewer; reading
+  stays on project.view). workspace/files.save_upload: bare-name rules
+  (≤255, no `/ \\ ..` or null byte), the same folder wall, never writes
+  over a folder or THROUGH a symlink, 409 without the overwrite flag,
+  size cap `FILES_UPLOAD_MAX_BYTES` (settings/env, default 50 MB)
+  enforced on the declared size AND while writing (a lying Content-Length
+  still stops, the partial file is removed). The 64 KB pause-wall does
+  not bite: Django's DATA_UPLOAD cap never counts multipart FILE parts,
+  and nginx's client_max_body_size is already 50m.
+  · UI: an Upload button + hidden picker (multi-file, sequential) and
+  drag-and-drop onto the pane, a progress bar (XHR — fetch has no upload
+  progress), "Replace this file?" confirm on 409, list refresh on success;
+  all of it absent without the right.
+  TESTS: nucleus workspace/tests_files.py **UploadTests** (member uploads /
+  bytes land, subfolder, viewer 403 + outsider 404, overwrite flag, 413 +
+  nothing lands, name rules incl. the lying-size mid-write stop, wall);
+  frontend files-pane (no right = no control, picked file rides ?path= of
+  the OPEN folder + refresh, 409 → dialog → overwrite retry, drag-drop).
+  STILL OPEN here: part 4 run-as-web-page (blocked on the owner's security
+  ruling) and the optional New folder / Rename / Delete controls.
+  OWNER: run `manage.py seed_permissions` (the new right + role links —
+  no migration), nucleus suite now includes `workspace.tests_files`;
+  restart nucleus + engine after pulling.
 - **CHAINS REWORK — RULED (owner, 2026-10-22 18:39, after testing runbooks
   live).** Six parts:
   (1) RENAME: "chain" everywhere — UI, banners, docs (code may keep runbook
@@ -769,6 +925,57 @@ lesson 14) and rebuild the image — fold into the next image build.
   bias). Also warn in the UI when the supervisor is also a step persona.
   Inline ad-hoc chains (@chain "@A @B" "query") SKIPPED for v1 — fragile;
   a saved chain + query gives the same power.
+  **BUILT 2026-10-29 (Chains v2, 1.1.0 — all six parts, in the real folders).**
+  (1) RENAME: every banner/announce line is "Chain: …" (runbooks.py _announce
+  lines, api.py error wording, tasks.py, schedules wording); frontend: the
+  Intelligence tab is "Chains", every button/dialog/toast says chain,
+  /add-chain + /list-chains added (old /add-runbook names still work); code
+  keeps runbook internals as the ruling allows.
+  (2) MODEL STEPS: step kind "model" = {model_config_id, prompt, role} — the
+  model must be ATTACHED to the project; execution goes through a NEW engine
+  road POST /api/v1/models/transform/ (ai_engine/pydantic_ai_system/
+  model_transform.py — built by the same ModelFactory as model_check, streamed,
+  usage counted with UsageReader's semantics) via NexusAIClient.transform();
+  the reply posts AS THE CHAIN (ChatMessage sender=None, persona_name=chain
+  title, chain_step+model_name in metadata — chat serialise lets a senderless
+  persona_name through; the app shows a "chain" pill) and BILLS
+  kind=chat_reply, persona_id empty, job_id="chain-run:<id>",
+  source=chain_model_step (UsageRecord written in runbooks.py, priced by
+  intelligence/pricing.price_record). No tools, no approvals; retry/redo/
+  review/on_failure rules apply unchanged (_run_step dispatches).
+  (3) QUERY: RunbookRun.query (migration **0044_chain_query** — RUN ON THE
+  SERVER), RunbookStartIn.query (≤4,000, 400 over), start_run(..., query);
+  _with_query() prepends "The chain's task for this run:" to EVERY step's
+  prompt (redos included) and the supervisor's review question; the start
+  announce line carries "Task: …" (clipped 200); serialise_run ships query +
+  current_role; a SCHEDULE's query_text now rides the run as the chain's task
+  (tasks.py), and the schedules UI offers it for chain schedules; the gateway's
+  run_chain tool takes query too. Run dialog has a "What is this run about?"
+  box.
+  (4) @ChainName <query>: chat/api.py step 5c2 — mention tokens no persona
+  answered to are matched against chain titles (case/separators ignored:
+  @WeeklyOpsUpdate = "Weekly ops update"; personas always win their own name);
+  the rest of the message rides as the query. Door per the ruling: project
+  admin/owner — runbook.manage + persona.mention; a member keeps the ▶ Run
+  button (kept, as leaned). Refusals ride the normal mention_refused shape; a
+  chain mention suppresses the session auto-trigger like a persona mention.
+  (5) ROLE LABELS: optional per persona/model step (≤60 chars); serialised,
+  in step_results, in the reply's runbook_run metadata and in serialise_run's
+  current_role — the chat banner and the message chip read "step 2 of 4 —
+  Reviewer"; editor has a Role label field; history rows show it.
+  (6) SUPERVISOR WARNING: the editor warns (never blocks) when the supervisor
+  is also a step persona (the bias fix's prompt half shipped in 1.0.0).
+  TESTS: nucleus scheduling/tests_chains.py **ChainsV2Tests** (5 tests:
+  query ride incl. redo+review+start line, role labels end to end, model step
+  end to end incl. billing + failure road, @ChainName mention incl. the admin
+  door and separator forgiveness, schedule query_text ride) + gateway
+  run_chain-takes-a-query + all pinned "Runbook:" lines in scheduling/tests.py
+  now "Chain:"; engine tests/test_model_transform.py (tr1–tr3); frontend:
+  runbooks-tab/runbook-banner/message-list/message-store/schedules-panel/slash
+  tests updated + new (model step editor, supervisor warning, query in run
+  dialog + schedule dialog, role in banner/chip). OWNER: run the three suites,
+  `manage.py migrate` (0044), restart nucleus+engine containers, commit both
+  repos.
 - **FREE-LLM ONBOARDING — RULED (owner, 2026-10-23 evening; full work
   order with hard rules lives in the owner's private project doc
   free-llm-onboarding-prompt — business/credits tracks stay OUT of this
@@ -806,6 +1013,34 @@ lesson 14) and rebuild the image — fold into the next image build.
   approves every card; keys never in chat; honest rate-limit/data-usage
   wording. Parts 1–2 build in the Nov 2–6 week; parts 3–4 ride the setup-
   copilot week.
+  **Parts 1+2 BUILT 2026-10-29 (early — the owner wanted the list done).**
+  · WP1: `intelligence/model_presets.py` — the owner's seven (GitHub Models,
+  Gemini, Groq, OpenRouter :free, Mistral, Cerebras, Ollama flagged private/
+  keyless), each with provider type, API base, recommended ids, the
+  provider's key page, a rate note and a data-usage note; served at
+  `GET /model-presets/` (model_config.list); the Register dialog shows them
+  as **"Free to start" tiles** — a click pre-fills name/provider/id/base,
+  never a key, and shows the key page + BOTH honesty notes verbatim.
+  · NEEDED FIX riding along: the bare-model-id guard now EXEMPTS
+  `openai_compatible` (server `_reject_prefixed_model_id` + the dialog rule)
+  — OpenRouter's `meta-llama/…:free` and GitHub Models' `openai/gpt-4o-mini`
+  are real ids with separators, reached by api_base + the id verbatim; every
+  native provider keeps the wall.
+  · WP2: the persona catalogue gains **"Guide" (setup-helper)** whose system
+  prompt is RENDERED from the presets (persona_catalog.helper_entry →
+  model_presets.helper_prompt — rule (b): never hardcoded): triage questions,
+  per-provider key steps + pages, the honesty rules, Ollama as the private
+  path, hand-off to the Free-to-start tiles, and a standing refusal to take
+  keys in chat (revoke-and-remint if pasted). No capabilities until WP3's
+  register_model.
+  TESTS: nucleus intelligence/tests.py FreeStartPresetTests (presets shape +
+  honesty notes + provider values, helper prompt rendered from the data +
+  the hard rules, separator-id exception incl. the native-provider wall
+  held); frontend models-tab (tile pre-fill + notes + legal separator id,
+  keyless/private Ollama wording). OWNER before release: try each preset
+  against the real provider once — endpoints and free tiers move; WP3
+  (register_model + secure key card) and WP4 (one-click connects) still
+  ride the setup-copilot week.
 
 - **MCP suggest-attach — RULED (owner, 2026-10-22 17:34: "option 2").** The
   persona may SEE the names + descriptions of the project's other MCP
@@ -818,6 +1053,26 @@ lesson 14) and rebuild the image — fold into the next image build.
   auto-attach, a crafted message must not be able to arm a persona. Found
   live: "what shopping tools do you have?" → "none" while Shopping (demo)
   sat one tick away. Build after the pass (Stage 4).
+  **BUILT 2026-10-29.** Nucleus: PersonaInternal gains `other_servers`
+  (internal/api.py OtherServerInternal — name + a 200-char one-liner and
+  NOTHING else; the project's active external servers not attached to the
+  persona, attached/internal/other-project rows excluded). Engine:
+  PersonaSpec.other_servers → one STABLE prompt section (prompts/layout.py,
+  priority 70 — drops before the catalog under budget pressure): "Tool
+  servers that exist in this project but are NOT attached to you: … You
+  cannot see or call their tools, and must never pretend to. … someone with
+  persona-edit rights can attach it to you under Intelligence." No tool, no
+  schema, no dial — the wall holds; an older engine ignores the field and an
+  older nucleus simply sends none. The attach click itself is the personas
+  tab's existing edit road — nothing new to build there. TESTS: nucleus
+  internal/tests.py SuggestAttachInternalTests (names+lines only, shape
+  pinned, attached/foreign/internal rows excluded, all-attached ⇒ []);
+  engine tests/test_tools.py test_suggest_attach_names_the_projects_other_servers
+  (section + wording in the request, ask_user stays the only tool, no
+  section without the field). FIXED in the 2026-10-29 round: ot9 builds the
+  layout with a bare SimpleNamespace persona, which the new section's plain
+  attribute read broke (AttributeError) — layout.py now reads other_servers
+  with getattr(…, ()) so lighter persona-shaped callers stay valid.
 - **Setup copilot — ADMIN TOOLS ON THE GATEWAY (owner asked 2026-10-22: "ai
   can help me setting up models, mcps, users, personas" — NOT yet developed;
   the neuralops-mcp repo is only a shopping-tools demo).** CORRECTED after
@@ -843,6 +1098,30 @@ lesson 14) and rebuild the image — fold into the next image build.
   dialogs. NOTE for create_model/update_model: an api_key travels as a tool
   argument — never echoed back in results, never logged; results carry
   has_api_key only, like the REST API.
+  **GATEWAY ADMIN TOOLS BUILT 2026-10-29 night (the owner's 10, on the same
+  door — gateway/tools.py + TOOL_DEFS/dispatch in gateway/api.py; 18 tools
+  total now).** list_models · create_model (refuses without
+  accept_provider_terms; runs the dialog's pre-save provider check — a model
+  that cannot answer is refused, not saved; key write-only, results carry
+  has_api_key) · update_model (reach changes re-check first, stored key via
+  config_id when none given) · list_personas · create_persona ·
+  update_persona (prompt/format/name/model/steps/gate — patch_persona's own
+  road) · list_users (the Members page's rule: any member) ·
+  get_topic_messages (topic row-visibility, ai_only filter, newest-200 cap) ·
+  create_topic · update_topic (rename under topic.update; archive AND restore
+  under topic.archive). All thin front doors over the dialogs' services — no
+  new business logic, rights as the calling person, invisible = nonexistent.
+  TESTS: gateway/tests.py AdminGatewayToolTests (check-first + nothing-saved
+  on a failing check + the key never in any result + Member walls; rename
+  never re-checks, a reach change does, with the stored key; persona create/
+  update/list with rights; members + topic transcript incl. ai_only + rename/
+  archive/restore tiers) + the tools/list pin now names all 18.
+  STILL ON THE SETUP-COPILOT WEEK: the secure key card (WP3 — the IN-CHAT
+  road where a persona proposes register_model and the key is typed on an
+  approval card, never in a message; the gateway road above is key-as-
+  argument by the owner's ruling), WP4 one-click connects, mounting these
+  tools INSIDE for personas via InternalActor, and audit "investigate with
+  a model".
 
 - MCP connector toggles ship WITH the bundled connectors (scope ruling: no
   dead switches) — MCP track.

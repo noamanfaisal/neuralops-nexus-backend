@@ -372,6 +372,23 @@ class AIRequestLog(TenantBaseModel):
         related_name="request_logs",
     )
 
+    # -- AI audit log (1.3.0, owner's ask 2026-10-29: "how every prompt is
+    # building — vector db + system prompt + context + file …") --------------
+    # topic/project scope the log per chat and gate it per project
+    # (project.audit); breakdown is the PROMPT ANATOMY the engine captured:
+    #   {"sections": [{kind, chars, text}], "history": [...], "message": ...,
+    #    "retrieval": [{label, score, kind}], "extra_instructions": ...,
+    #    "resume": bool, "fallback_attempt": int}
+    # role is the model seat that ran (STANDARD/ROUTER/DEEP/FALLBACK).
+    topic_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    project = models.ForeignKey(
+        "nucleus.Project", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="ai_request_logs",
+    )
+    role = models.CharField(max_length=20, blank=True, default="")
+    model_name = models.CharField(max_length=255, blank=True, default="")
+    breakdown = models.JSONField(default=dict, blank=True)
+
     # -- Model identity -------------------------------------------------------
     model_id = models.CharField(max_length=255)   # e.g. "claude-haiku-4-5-20251001"
     provider = models.CharField(max_length=50)    # e.g. "anthropic"

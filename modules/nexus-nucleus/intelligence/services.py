@@ -68,7 +68,7 @@ def create_model_config(company, user, data: dict):
 
     api_key = data.pop("api_key", None)
     _reject_unknown_provider(data.get("provider"))
-    _reject_prefixed_model_id(data.get("model_id"))
+    _reject_prefixed_model_id(data.get("model_id"), data.get("provider"))
 
     config = ModelConfig(company=company, created_by=user, **data)
     if api_key:
@@ -96,7 +96,8 @@ def update_model_config(company, config_id: str, data: dict):
     if data.get("provider") is not None:
         _reject_unknown_provider(data["provider"])
     if data.get("model_id") is not None:
-        _reject_prefixed_model_id(data["model_id"])
+        # Judged against the EFFECTIVE provider — the patch's, else the stored one.
+        _reject_prefixed_model_id(data["model_id"], data.get("provider") or config.provider)
 
     # Save-lock (owner's ruling 2026-10-28): changing how the model is REACHED
     # voids the last passed check -- those values were never verified. Ordinary
@@ -139,7 +140,7 @@ def check_model_config(company, data: dict) -> dict:
 
     provider, model_id = data.get("provider"), (data.get("model_id") or "").strip()
     _reject_unknown_provider(provider)
-    _reject_prefixed_model_id(model_id)
+    _reject_prefixed_model_id(model_id, provider)
     if not model_id:
         raise ValueError("A model id is required.")
     api_key = data.get("api_key") or None
@@ -295,14 +296,23 @@ def _reject_unknown_provider(provider) -> None:
         raise ValueError("provider must be one of: %s." % ", ".join(valid))
 
 
-def _reject_prefixed_model_id(model_id) -> None:
+def _reject_prefixed_model_id(model_id, provider=None) -> None:
     """
     model_id holds the BARE model name. A value carrying a provider prefix
     is almost always someone pasting a LiteLLM ("anthropic/claude-...") or
     pydantic-ai ("anthropic:claude-...") string, which would make
     qualified_id produce "openai:anthropic/claude-..." and fail at call time
     with a confusing provider error.
+
+    EXCEPTION (free-LLM onboarding WP1, 2026-10-29): an OpenAI-compatible
+    endpoint names its own models, and the real ids carry separators —
+    OpenRouter's "meta-llama/llama-3.3-70b-instruct:free", GitHub Models'
+    "openai/gpt-4o-mini". The engine reaches these by api_base + the id AS
+    GIVEN (never by parsing qualified_id), so the confusion this guard
+    exists for cannot arise there — the id passes verbatim.
     """
+    if provider == "openai_compatible":
+        return
     value = (model_id or "").strip()
     if "/" in value or ":" in value:
         raise ValueError(

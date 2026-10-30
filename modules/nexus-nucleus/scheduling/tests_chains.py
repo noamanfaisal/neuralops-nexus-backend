@@ -338,3 +338,170 @@ class GatewayChainToolTests(ChainFixture):
                                        {"chain_id": str(chain.id), "topic_id": str(self.t1.id)})
         self.assertTrue(is_error)
         delay.assert_not_called()
+
+    def test_run_chain_takes_a_query(self):
+        """Chains v2 ruling 3 on the gateway door too."""
+        chain = self.chain(steps=self.steps[:1])
+        sara_token = self.token_for(self.sara)
+        with patch("scheduling.tasks.run_runbook.delay") as delay:
+            is_error, out = self.tool(sara_token, "run_chain",
+                                      {"chain_id": str(chain.id), "topic_id": str(self.t1.id),
+                                       "query": "the May numbers"})
+        self.assertFalse(is_error, out)
+        delay.assert_called_once_with(out["run_id"])
+        self.assertEqual(RunbookRun.objects.get(id=out["run_id"]).query, "the May numbers")
+
+
+# ── Chains v2 (1.1.0 — the 2026-10-22 rulings' remaining five parts) ──────────
+
+class ChainsV2Tests(ChainFixture):
+    """Query at run time (ruling 3), role labels (5), model-only steps (2),
+    @ChainName in chat (4), and a schedule's query_text riding along."""
+
+    def test_the_query_rides_every_step_the_redo_the_review_and_the_start_line(self):
+        chain = self.chain(steps=self.steps[:2], supervisor=self.persona_bob)
+        r, _ = self.start(chain, self.sara, {"topic_id": str(self.t1.id), "query": "The May numbers."})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["query"], "The May numbers.")
+        run = RunbookRun.objects.get(id=r.json()["id"])
+        self.assertEqual(run.query, "The May numbers.")
+        calls = self.execute_chain(run.id, reviews=["REDO\nAdd June too.", "APPROVE", "APPROVE"])
+        run.refresh_from_db()
+        self.assertEqual(run.status, "done", run.error)
+        stages = [c for c in calls if not (c.get("runbook_run") or {}).get("review")]
+        reviews = [c for c in calls if (c.get("runbook_run") or {}).get("review")]
+        self.assertEqual((len(stages), len(reviews)), (3, 3))  # step 1, its redo, step 2
+        task_block = "The chain's task for this run:\nThe May numbers."
+        self.assertTrue(all(task_block in c["user_message"] for c in stages))   # redo included
+        self.assertTrue(all(task_block in c["user_message"] for c in reviews))  # the reviewer judges against the task
+        self.assertIn(
+            f"Chain: Weekly ops update started by {self.sara.get_display_name()} — 2 steps. Task: The May numbers.",
+            self.lines(),
+        )
+        # An oversize query is refused at the door.
+        r, _ = self.start(chain, self.sara, {"topic_id": str(self.t1.id), "query": "x" * 4001})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("query", r.json()["detail"])
+
+    def test_role_labels_ride_the_definition_the_metadata_and_the_results(self):
+        steps = [{**self.steps[0], "role": "Analyst"}, {**self.steps[1], "role": "Reviewer"}]
+        chain = self.chain(steps=steps)
+        r = self.call("get", self.runs_path, self.owner)
+        row = next(x for x in r.json() if x["id"] == str(chain.id))
+        self.assertEqual([s["role"] for s in row["steps"]], ["Analyst", "Reviewer"])
+        run = self.started(chain)
+        calls = self.execute_chain(run.id)
+        run.refresh_from_db()
+        self.assertEqual(run.status, "done", run.error)
+        self.assertEqual([c["runbook_run"].get("role") for c in calls], ["Analyst", "Reviewer"])
+        self.assertEqual([s["role"] for s in run.step_results], ["Analyst", "Reviewer"])
+        # The reply row's metadata block carries it — the app's banner reads it.
+        first = ChatMessage.objects.filter(topic=self.t1, metadata__has_key="runbook_run").order_by("sequence").first()
+        self.assertEqual(first.metadata["runbook_run"]["role"], "Analyst")
+        # Too long is refused; empty means no label, as before.
+        bad = [{**self.steps[0], "role": "r" * 61}]
+        r = self.call("post", self.runs_path, self.owner, {"title": "x", "steps": bad})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("role", r.json()["detail"])
+
+    def test_a_model_step_transforms_posts_as_the_chain_and_bills_chat_reply(self):
+        from nucleus.models import ModelConfig, UsageRecord
+
+        model_step = {"kind": "model", "model_config_id": str(self.model_config.id),
+                      "prompt": "Tighten the draft.", "role": "Editor"}
+        chain = self.chain(steps=[self.steps[0], model_step], title="Edit pass")
+        r = self.call("get", self.runs_path, self.owner)
+        row = next(x for x in r.json() if x["id"] == str(chain.id))
+        self.assertEqual((row["steps"][1]["kind"], row["steps"][1]["model_name"]), ("model", "GPT Test"))
+        run = self.started(chain)
+        transform = {"ok": True, "text": "A tighter draft.", "usage": {
+            "input_tokens": 120, "uncached_input_tokens": 100, "cache_read_tokens": 20,
+            "cache_write_5m_tokens": 0, "cache_write_1h_tokens": 0,
+            "output_tokens": 30, "reasoning_tokens": 0, "finish_reason": "stop", "estimated": False,
+        }}
+        with patch("chat.services.NexusAIClient") as client:
+            client.return_value.transform.return_value = transform
+            calls = self.execute_chain(run.id)
+        run.refresh_from_db()
+        self.assertEqual(run.status, "done", run.error)
+        self.assertEqual(len(calls), 1)  # only step 1 went through the trigger road
+        sent = client.return_value.transform.call_args.args[0]
+        self.assertIn("The previous step's output:\nreply 1", sent["prompt"])
+        self.assertIn("Tighten the draft.", sent["prompt"])
+        # The reply posts AS THE CHAIN: no sender, the chain's title as the name.
+        row = ChatMessage.objects.get(topic=self.t1, content="A tighter draft.")
+        self.assertIsNone(row.sender)
+        self.assertTrue(row.metadata["chain_step"])
+        self.assertEqual(row.metadata["model_name"], "GPT Test")
+        self.assertEqual(row.metadata["runbook_run"]["role"], "Editor")
+        from chat.services import _serialise
+        self.assertEqual(_serialise(row)["sender_name"], "Edit pass")
+        # The result row names the model; the output flows on as context.
+        self.assertEqual((run.step_results[1]["kind"], run.step_results[1]["model_name"]), ("model", "GPT Test"))
+        self.assertEqual(run.context, "A tighter draft.")
+        # Billing: kind=chat_reply, the run riding job_id, no persona (the ruling).
+        usage_row = UsageRecord.objects.get(source="chain_model_step")
+        self.assertEqual((usage_row.kind, usage_row.persona_id, usage_row.job_id),
+                         ("chat_reply", "", f"chain-run:{run.id}"))
+        self.assertEqual((usage_row.input_tokens, usage_row.output_tokens), (120, 30))
+        self.assertEqual(usage_row.message_id, str(row.id))
+        # A model not attached to the project is refused at definition time.
+        other = ModelConfig.objects.create(company=self.company, name="Other", provider="openai", model_id="o")
+        r = self.call("post", self.runs_path, self.owner,
+                      {"title": "b", "steps": [{"kind": "model", "model_config_id": str(other.id), "prompt": "x"}]})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("model", r.json()["detail"])
+        # A transform the engine refuses is a FAILED step under the stop rule.
+        run2 = self.started(chain)
+        with patch("chat.services.NexusAIClient") as client:
+            client.return_value.transform.return_value = {"ok": False, "error_code": "model_failure", "error": "bad key"}
+            self.execute_chain(run2.id)
+        run2.refresh_from_db()
+        self.assertEqual(run2.status, "failed")
+        self.assertIn("model_failure", run2.error)
+
+    def test_a_chain_mention_in_chat_starts_the_run_with_the_query(self):
+        """Ruling 4: @ChainName <query> — the admin door; a member keeps the Run button."""
+        chain = self.chain(steps=self.steps[:1])  # "Weekly ops update"
+        with patch("scheduling.tasks.run_runbook.delay") as delay:
+            r, trigger, _ = self.send(self.owner, "@WeeklyOpsUpdate the May numbers")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["refusals"], [])
+        delay.assert_called_once()
+        trigger.assert_not_called()  # no persona was mentioned; nothing fires on top
+        run = RunbookRun.objects.get()
+        self.assertEqual((run.runbook_id, run.topic_id, run.started_by), (chain.id, self.t1.id, self.owner))
+        self.assertEqual(run.query, "the May numbers")
+        # Case and separators are forgiven.
+        with patch("scheduling.tasks.run_runbook.delay") as delay:
+            r, _, _ = self.send(self.owner, "@weekly_ops_update again")
+        self.assertEqual(r.status_code, 200, r.content)
+        delay.assert_called_once()
+        # sara is a Member: she may press Run, but the chat door is the admins' (the ruling).
+        with patch("scheduling.tasks.run_runbook.delay") as delay:
+            r, _, _ = self.send(self.sara, "@WeeklyOpsUpdate again")
+        self.assertEqual(r.status_code, 200, r.content)
+        delay.assert_not_called()
+        self.assertEqual(r.json()["refusals"][0]["message"], "Only a project admin may start a chain from chat.")
+        self.assertEqual(r.json()["refusals"][0]["name"], "Weekly ops update")
+        # A token that names neither a persona nor a chain stays a word.
+        with patch("scheduling.tasks.run_runbook.delay") as delay:
+            r, _, _ = self.send(self.owner, "@NoSuchThing hello")
+        self.assertEqual((r.status_code, r.json()["refusals"]), (200, []))
+        delay.assert_not_called()
+
+    def test_a_scheduled_chain_fire_carries_the_schedules_query_text(self):
+        from nucleus.models import PersonaSchedule
+        from scheduling.tasks import fire_persona_schedule
+
+        chain = self.chain(steps=self.steps[:1])
+        schedule = PersonaSchedule.objects.create(
+            company=self.company, project=self.p1, topic=self.t1, runbook=chain,
+            created_by=self.owner, schedule_kind="interval", interval_every=1, interval_period="days",
+            query_text="Monday's numbers", label="", timezone="UTC",
+        )
+        with patch("scheduling.tasks.run_runbook.delay") as delay, \
+             patch("chat.services.publish"), patch("chat.services.publish_async", new_callable=AsyncMock):
+            fire_persona_schedule(str(schedule.id))
+        delay.assert_called_once()
+        self.assertEqual(RunbookRun.objects.get().query, "Monday's numbers")

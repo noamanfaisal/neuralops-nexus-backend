@@ -68,10 +68,14 @@ class ScheduleOut(Schema):
 class RunbookStepIn(Schema):
     # Step 7: two kinds. "persona" (the default) runs a stage; "checkpoint"
     # waits for a person's answer (question required, persona fields ignored).
+    # Chains v2 adds "model": a bare model + prompt, a text-only transform —
+    # no tools, no approvals (model_config_id required, persona fields ignored).
     kind: str = "persona"
     persona_id: Optional[str] = None   # required for persona steps — validated server-side
-    prompt: Optional[str] = None       # required for persona steps
+    model_config_id: Optional[str] = None  # required for model steps (Chains v2)
+    prompt: Optional[str] = None       # required for persona and model steps
     question: Optional[str] = None     # required for checkpoint steps
+    role: Optional[str] = None         # Chains v2: label shown in banners ("Reviewer")
     routine_id: Optional[str] = None
     output_type: str = "auto"
     on_failure: str = "stop"   # stop | skip | retry (checkpoints: stop | skip)
@@ -97,11 +101,14 @@ class RunbookPatchIn(Schema):
 
 
 class RunbookStepOut(Schema):
-    kind: str = "persona"                # persona | checkpoint
+    kind: str = "persona"                # persona | model | checkpoint
     persona_id: Optional[str] = None
     persona_name: Optional[str] = None   # as the persona is named now; None once it is gone
+    model_config_id: Optional[str] = None  # model steps only (Chains v2)
+    model_name: Optional[str] = None       # as the model is named now; None once it is gone
     prompt: Optional[str] = None
     question: Optional[str] = None       # checkpoint steps only
+    role: Optional[str] = None           # Chains v2: banner label ("Reviewer")
     routine_id: Optional[str] = None
     routine_title: Optional[str] = None
     output_type: Optional[str] = None
@@ -124,10 +131,13 @@ class RunbookOut(Schema):
 
 
 class RunbookStartIn(Schema):
-    """Where to run: this topic, or a new one in a channel (titled after the runbook by default)."""
+    """Where to run: this topic, or a new one in a channel (titled after the chain by default).
+    Chains v2 (ruling 3): `query` is the task this run is about — it rides into
+    step 1's prompt and every step (and the supervisor) sees it."""
     topic_id: Optional[str] = None
     channel_id: Optional[str] = None
     title: Optional[str] = None
+    query: Optional[str] = None
 
 
 class CheckpointAnswerIn(Schema):
@@ -146,11 +156,13 @@ class RunbookRunOut(Schema):
     started_by_id: Optional[str] = None
     started_by_name: Optional[str] = None
     status: str                 # queued | running | waiting | done | failed | stopped
+    query: str = ""             # Chains v2: the task this run was started with
     current_step: int           # 0-based; -1 before the first step
+    current_role: str = ""      # Chains v2: the running step's role label ("Reviewer")
     # Step 7: the pending checkpoint while status=waiting — {index, question, asked_at}.
     checkpoint: Optional[dict] = None
     step_count: int
-    step_results: list          # [{index, persona_id, persona_name, message_id, status, attempts, started_at, ended_at, error}]
+    step_results: list          # [{index, persona_id, persona_name, role, message_id, status, attempts, started_at, ended_at, error}]
     skipped_count: int = 0      # steps that did not complete -- a "done" run with one is not a clean one
     started_at: Optional[str] = None
     ended_at: Optional[str] = None

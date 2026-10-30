@@ -244,7 +244,7 @@ class RunbookApiTests(RunbookFixture):
         run.refresh_from_db()
         self.assertEqual((run.status, run.error), ("stopped", f"Stopped by {self.sara.get_display_name()}"))
         self.assertIsNotNone(run.ended_at)
-        self.assertEqual(self.lines(), ["Runbook: Weekly ops update stopped by " + self.sara.get_display_name() + " before it started."])
+        self.assertEqual(self.lines(), ["Chain: Weekly ops update stopped by " + self.sara.get_display_name() + " before it started."])
         self.assertEqual(self.call("post", f"{self.runs_path}runs/{run.id}/stop/", self.sara).status_code, 409)
         # A running run: the current reply gets the stop signal; the loop ends it.
         from chat.services import create_ai_message
@@ -282,8 +282,8 @@ class RunbookExecutionTests(RunbookFixture):
         self.assertTrue(all(s["message_id"] and s["started_at"] and s["ended_at"] for s in run.step_results))
         self.assertIsNotNone(run.ended_at)
         self.assertEqual(self.lines(), [
-            f"Runbook: Weekly ops update started by {self.sara.get_display_name()} — 3 steps.",
-            "Runbook: Weekly ops update finished — 3 steps.",
+            f"Chain: Weekly ops update started by {self.sara.get_display_name()} — 3 steps.",
+            "Chain: Weekly ops update finished — 3 steps.",
         ])
         self.assertEqual(runbooks.serialise_run(run)["skipped_count"], 0)
         # Every reply row says which step it was.
@@ -318,7 +318,7 @@ class RunbookExecutionTests(RunbookFixture):
         self.assertEqual(run.status, "failed")
         self.assertIsNotNone(run.ended_at)
         self.assertIn("RuntimeError", run.error)
-        self.assertEqual(self.lines()[-1], "Runbook: Weekly ops update stopped unexpectedly — the server could not carry it to the end.")
+        self.assertEqual(self.lines()[-1], "Chain: Weekly ops update stopped unexpectedly — the server could not carry it to the end.")
 
     def test_a_failed_step_follows_its_policy(self):
         rb = self.runbook()
@@ -333,7 +333,7 @@ class RunbookExecutionTests(RunbookFixture):
         self.assertIn("refused", run.step_results[1]["error"])
         # A skipped step is never hidden behind a plain "finished".
         self.assertEqual(runbooks.serialise_run(run)["skipped_count"], 1)
-        self.assertEqual(self.lines()[-1], "Runbook: Weekly ops update finished — 3 steps, 1 skipped.")
+        self.assertEqual(self.lines()[-1], "Chain: Weekly ops update finished — 3 steps, 1 skipped.")
         # stop (the default): step 1 fails, nothing else runs, the line says why.
         run = RunbookRun.objects.get(id=self.start(rb, self.sara)[0].json()["id"])
         calls = self.execute(run.id, {1: "failed"})
@@ -343,7 +343,7 @@ class RunbookExecutionTests(RunbookFixture):
         self.assertEqual([s["status"] for s in run.step_results], ["failed"])
         self.assertEqual(runbooks.serialise_run(run)["skipped_count"], 0)  # failed, not skipped
         self.assertIn("step 1 of 3", run.error)
-        self.assertEqual(self.lines()[-1], "Runbook: Weekly ops update failed at step 1 of 3 — The model provider refused the key.")
+        self.assertEqual(self.lines()[-1], "Chain: Weekly ops update failed at step 1 of 3 — The model provider refused the key.")
         # retry: one more attempt, then the step counts as failed under the stop rule.
         rb.steps[0]["on_failure"] = "retry"
         rb.save()
@@ -366,7 +366,7 @@ class RunbookExecutionTests(RunbookFixture):
         self.assertEqual(len(calls), 2)
         run.refresh_from_db()
         self.assertEqual((run.status, [s["status"] for s in run.step_results]), ("stopped", ["done", "stopped"]))
-        self.assertEqual(self.lines()[-1], "Runbook: Weekly ops update stopped at step 2 of 3.")
+        self.assertEqual(self.lines()[-1], "Chain: Weekly ops update stopped at step 2 of 3.")
         # A stopped step is not a skipped one -- the count means what it says.
         self.assertEqual(runbooks.serialise_run(run)["skipped_count"], 0)
         # Marked stopped from outside between steps: the loop does not start the next one.
@@ -383,7 +383,7 @@ class RunbookExecutionTests(RunbookFixture):
         run.refresh_from_db()
         self.assertEqual(run.status, "stopped")
         self.assertIsNotNone(run.ended_at)
-        self.assertEqual(self.lines()[-1], "Runbook: Weekly ops update stopped by Sara after step 1 of 3.")
+        self.assertEqual(self.lines()[-1], "Chain: Weekly ops update stopped by Sara after step 1 of 3.")
 
     def test_a_run_re_checks_its_starter_and_a_missing_persona_fails_the_step(self):
         rb = self.runbook()
@@ -394,7 +394,7 @@ class RunbookExecutionTests(RunbookFixture):
         run.refresh_from_db()
         self.assertEqual(run.status, "failed")
         self.assertIn("can no longer call personas", run.error)
-        self.assertEqual(self.lines()[-1], f"Runbook: Weekly ops update did not start — {self.sara.email} can no longer call personas in this chat.")
+        self.assertEqual(self.lines()[-1], f"Chain: Weekly ops update did not start — {self.sara.email} can no longer call personas in this chat.")
         # A persona removed after the runbook was written: that step fails (here under skip).
         self.assign(self.sara, "Member")
         run = RunbookRun.objects.get(id=self.start(rb, self.sara)[0].json()["id"])
