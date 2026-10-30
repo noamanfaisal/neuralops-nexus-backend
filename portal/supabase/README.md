@@ -98,10 +98,10 @@ screen finishes with you as owner. The second claim attempt answers 409.
 
 | File | What | JWT verify |
 |---|---|---|
-| `schema.sql` | the `device_requests` table, RLS locked (service-role only) | — |
+| `schema.sql` | the `device_requests`, `phone_home_events` and `claim_attempts` tables, RLS locked (service-role only) | — |
 | `functions/device-request/` | install asks for a code | ON |
 | `functions/device-poll/` | install polls; token handed out once | ON |
-| `functions/device-claim/` | the page claims with the person's session | ON |
+| `functions/device-claim/` | the page claims with the person's session; guess-brake: 5 wrong codes per account per 10 min → 429 (needs `claim_attempts` from schema.sql — missing table = brake off, claiming still works) | ON |
 | `functions/phone-home/` | installs report their one token total (open/close) | ON |
 | `../claim-page/index.html` | the browser page (sign in + type the code) — static, hosted anywhere | — |
 | `functions/claim-page/` | RETIRED — Supabase won't render HTML from functions; kept for history | — |

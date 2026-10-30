@@ -569,8 +569,14 @@ hand-over note; project-level holder sees no picker and mints for themself).
 
 ## 7. Portal / distribution track
 
-- **device-claim guess-brake** (recorded TODO): ~5 wrong codes per account
-  per 10 min → wait. Needs an index.ts change + owner redeploy. Small.
+- **device-claim guess-brake — CODE BUILT 2026-10-30, owner deploy pending.**
+  device-claim/index.ts now refuses (429, worded) after 5 well-formed WRONG
+  codes per account per 10 minutes, logged in a new `claim_attempts` table
+  (schema.sql; RLS locked, service-role only; rows age out, nothing to
+  clean). A malformed code never counts; a missing table degrades to no
+  brake with a console warning, so claiming keeps working until the table
+  exists. OWNER: SQL Editor → run schema.sql's claim_attempts block, then
+  redeploy the `device-claim` function.
 - **OAuth relay + vendor "NeuralOps" app registrations** — the catalog's
   oauth_preset client_ids are empty until the vendor apps exist; until then
   the "Connect with NeuralOps" button rightly stays hidden.

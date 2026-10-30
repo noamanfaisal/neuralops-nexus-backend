@@ -46,3 +46,22 @@ create index if not exists phone_home_events_by_install
 
 alter table public.phone_home_events enable row level security;
 -- No policies on purpose: service-role-only access.
+
+-- ---------------------------------------------------------------------------
+-- claim guess-brake (added 2026-10-30) — the recorded TODO: a signed-in
+-- account gets ~5 WRONG codes per 10 minutes, then waits. device-claim logs
+-- each wrong, well-formed code here and refuses (429) once the window is
+-- full; rows simply age out of the window (nothing to clean). Same security
+-- stance: RLS on, NO policies — service-role (the edge function) only.
+
+create table if not exists public.claim_attempts (
+  id           bigint generated always as identity primary key,
+  user_id      uuid not null,
+  attempted_at timestamptz not null default now()
+);
+
+create index if not exists claim_attempts_by_user
+  on public.claim_attempts (user_id, attempted_at desc);
+
+alter table public.claim_attempts enable row level security;
+-- No policies on purpose: service-role-only access.
