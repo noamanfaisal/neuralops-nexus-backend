@@ -758,8 +758,8 @@ lesson 14) and rebuild the image — fold into the next image build.
   this is reading people's chats, needs its own right), and the viewer UI.
   **BUILT 2026-10-29 (1.3.0, the owner's 19:14 ask: "i want to know in log…
   how every prompt is building, vector db + system prompt + context +
-  file"). "Investigate with a model" is EXPLICITLY DEFERRED — it rides the
-  setup-copilot week, where a model gets tools.**
+  file"). ~~"Investigate with a model" is EXPLICITLY DEFERRED~~ — **BUILT
+  2026-10-30**, see the INVESTIGATE record at the end of this entry.**
   · CAPTURE (engine): ReplyGenerator records one audit dict per model RUN
   (reply_generator.py — a fallback or router→deep hand-over writes two): the
   plan's sections POST-FIT with kind + chars + FULL text (capped 20k/field —
@@ -1183,9 +1183,28 @@ lesson 14) and rebuild the image — fold into the next image build.
   entry pinned. Engine suite 150 passed / 5 skipped.
   ~~The secure key card (WP3)~~ **BUILT 2026-10-30** — see the free-LLM
   entry's Part 3 record above (the in-chat register_model road; the gateway
-  road stays key-as-argument by the owner's ruling). STILL ON THE
-  SETUP-COPILOT WEEK: WP4 one-click connects and audit "investigate with a
-  model".
+  road stays key-as-argument by the owner's ruling).
+  **AUDIT "INVESTIGATE WITH A MODEL" — BUILT 2026-10-30.** No tools needed
+  after all: `POST /projects/{id}/audit/investigate/` (REGISTERED BEFORE the
+  {log_id} route — whose regex also matches "investigate" and answered 405)
+  takes {question, model_config_id, topic_id?/msg_id?, limit≤50}; same
+  project.audit right as reading; the model must be ATTACHED to the project
+  (the chain-model-step rule); nucleus serializes the runs' anatomy (2k/field,
+  80k total — newest survive the cap) into one prompt and rides the engine's
+  EXISTING transform road (NexusAIClient.transform — Chains v2's bare model
+  call); the answer is EPHEMERAL (stored nowhere, never a chat message) and
+  bills kind=chat_reply source=audit_investigate like a chain model step.
+  UI: an "Investigate with a model" box atop the audit dialog's runs —
+  question, a picker of the project's attached models, Ask, the answer with
+  "answered by X · examined N runs · not stored anywhere". TESTS: nucleus
+  intelligence/tests.py InvestigateAuditTests (anatomy + question in the
+  transform prompt with the stored key server-side, billed; Member 403 /
+  unattached-model 400 / empty-scope 404 / empty-question 400 all BEFORE any
+  model call; an engine refusal is a worded 502 and nothing bills); frontend
+  context-panel audit describe +1 (attached-models-only picker, POST body
+  pinned, ephemeral answer + footer). STILL ON THE SETUP-COPILOT WEEK: WP4
+  one-click connects — the last piece, blocked on the vendor OAuth apps
+  (portal-side).
 
 - MCP connector toggles ship WITH the bundled connectors (scope ruling: no
   dead switches) — MCP track.

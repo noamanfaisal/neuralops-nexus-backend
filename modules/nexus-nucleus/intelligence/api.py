@@ -18,13 +18,16 @@ rotating an API key used to require delete-and-recreate, and delete is
 refused while any persona references the row.
 """
 from typing import List, Optional
-from ninja import Router
+from ninja import Router, Schema
 from ninja.errors import HttpError
 from pathlib import Path
 import base64
 import binascii
+import logging
 
-from nucleus.models import Project, Persona, AIRequestLog
+from nucleus.models import Project, Persona, AIRequestLog, ModelConfig
+
+logger = logging.getLogger(__name__)
 from authn.auth import SupabaseBearer
 from authn.permissions.checker import PermissionChecker
 from .schema import (
@@ -836,6 +839,22 @@ def list_audit_entries(request, project_id: str,
     return [_audit_entry(log, names) for log in logs]
 
 
+class AuditInvestigateIn(Schema):
+    question: str
+    model_config_id: str
+    topic_id: Optional[str] = None
+    msg_id: Optional[str] = None
+    limit: int = 20
+
+
+@router.post("/projects/{project_id}/audit/investigate/", response=dict)
+def investigate_audit_route(request, project_id: str, payload: AuditInvestigateIn):
+    """1.3.0 "investigate with a model" — must register BEFORE the {log_id}
+    route below, whose regex also matches /audit/investigate/. The real body
+    (investigate_audit) lives with its helpers further down."""
+    return investigate_audit(request, project_id, payload)
+
+
 @router.get("/projects/{project_id}/audit/{log_id}/", response=AuditEntryDetailOut)
 def get_audit_entry(request, project_id: str, log_id: str):
     """One run in full: the prompt anatomy (breakdown) + the raw response."""
@@ -845,6 +864,163 @@ def get_audit_entry(request, project_id: str, log_id: str):
         raise HttpError(404, "Audit entry not found.")
     names = _persona_names([log])
     return _audit_entry(log, names, detail=True)
+
+
+# ── "Investigate with a model" (1.3.0's deferred half) ────────────────────
+# Ask a model questions ABOUT the log, from inside the audit dialog. Same
+# right as reading the log (the model sees exactly what the admin may read);
+# the model must be attached to the project (the chain-model-step rule); the
+# answer is EPHEMERAL — never stored, never a chat message — and the call
+# bills like a chain model step (kind=chat_reply, source=audit_investigate).
+
+_INVESTIGATE_FIELD_CAP = 2_000     # chars per section/response text
+_INVESTIGATE_TOTAL_CAP = 80_000    # chars of log the prompt may carry
+_INVESTIGATE_RUNS_MAX = 50
+
+
+def _clip(text: str, cap: int = _INVESTIGATE_FIELD_CAP) -> str:
+    text = text or ""
+    return text if len(text) <= cap else text[: cap - 1] + "…"
+
+
+def _investigate_text(logs, names) -> tuple[str, int]:
+    """The runs as prompt text, oldest first; stops at the total cap so one
+    giant retrieval dump cannot blow the model's window. Returns (text, how
+    many runs made it in — the NEWEST survive, older ones drop first)."""
+    blocks: list[str] = []
+    total = 0
+    for n, log in enumerate(reversed(logs), 1):  # newest first while capping
+        b = log.breakdown or {}
+        lines = [
+            f"--- run · {log.created_at.isoformat()} · @{names.get(log.persona_id, '') or 'unknown'}"
+            f" · {log.provider}:{log.model_id} · seat {log.role or 'STANDARD'} · status {log.status}"
+            f" · tokens {log.prompt_tokens or 0}/{log.completion_tokens or 0} · {log.latency_ms or 0} ms"
+            f" · msg {log.msg_id} · topic {log.topic_id or '-'}",
+        ]
+        if b.get("message"):
+            lines.append(f"the user's message: {_clip(str(b['message']))}")
+        for section in b.get("sections") or []:
+            kind = section.get("kind", "?")
+            lines.append(f"[section {kind} · {section.get('chars', 0)} ch]\n{_clip(str(section.get('text') or ''))}")
+        if b.get("extra_instructions"):
+            lines.append(f"[extra instructions]\n{_clip(str(b['extra_instructions']))}")
+        retrieved = b.get("retrieval") or []
+        if retrieved:
+            lines.append("retrieval: " + "; ".join(
+                f"{r.get('label', '?')} ({r.get('score', '?')}, {r.get('kind', '?')})" for r in retrieved[:20]))
+        if b.get("history_count") is not None:
+            lines.append(f"history messages sent: {b.get('history_count')}"
+                         + (" · resumed run" if b.get("resume") else "")
+                         + (f" · fallback attempt {b.get('fallback_attempt')}" if b.get("fallback_attempt") else ""))
+        if log.response:
+            lines.append(f"the model's response:\n{_clip(log.response)}")
+        if log.error:
+            lines.append(f"error: {_clip(log.error, 500)}")
+        block = "\n".join(lines)
+        if total + len(block) > _INVESTIGATE_TOTAL_CAP and blocks:
+            blocks.append(f"(… {len(logs) - n + 1} older run(s) omitted — over the size cap)")
+            break
+        blocks.append(block)
+        total += len(block)
+    blocks.reverse()  # back to oldest-first for the model
+    omitted = blocks and blocks[-1].startswith("(…")
+    runs_in = len(blocks) - (1 if omitted else 0)
+    if omitted:
+        blocks.insert(0, blocks.pop())  # the omission note reads first
+    return "\n\n".join(blocks), runs_in
+
+
+# Registered up at the audit listing (BEFORE the {log_id} route — Django
+# resolves URLs in order, and "investigate" matches {log_id}'s regex, which
+# answered 405 to the POST). The body lives here with its helpers.
+def investigate_audit(request, project_id: str, payload: AuditInvestigateIn):
+    """Ask a model about this project's audit log. Ephemeral: the answer goes
+    back to the asker and nowhere else."""
+    company, project = _audit_project(request, project_id)
+    question = (payload.question or "").strip()
+    if not question:
+        raise HttpError(400, "Ask a question.")
+    if len(question) > 4_000:
+        raise HttpError(400, "The question is over 4,000 characters.")
+    config = ModelConfig.objects.filter(id=payload.model_config_id, company=company, is_active=True).first()
+    if not config:
+        raise HttpError(404, "Model not found.")
+    if not config.projects.filter(id=project.id, is_active=True).exists():
+        raise HttpError(400, "That model is not attached to this project — attach it first.")
+
+    qs = AIRequestLog.objects.filter(project=project)
+    if payload.topic_id:
+        qs = qs.filter(topic_id=payload.topic_id)
+    if payload.msg_id:
+        qs = qs.filter(msg_id=payload.msg_id)
+    logs = list(qs.order_by("-created_at")[: max(1, min(payload.limit or 20, _INVESTIGATE_RUNS_MAX))])
+    if not logs:
+        raise HttpError(404, "No audit entries in this scope yet.")
+    names = _persona_names(logs)
+    log_text, runs_in = _investigate_text(logs, names)
+
+    prompt = (
+        f'You are examining the AI AUDIT LOG of the project "{project.name}" — the recorded '
+        "anatomy of how each AI reply was built: the prompt sections sent, the retrieval hits, "
+        "the models and seats, tokens, latency and how each run ended. Answer the question "
+        "using ONLY this log. Be concrete (name runs by their time and persona); when the log "
+        "cannot answer, say so plainly rather than guessing.\n\n"
+        f"=== THE LOG ({runs_in} run(s), oldest first) ===\n{log_text}\n\n"
+        f"=== THE QUESTION ===\n{question}"
+    )
+    from chat.nexus_ai import NexusAIClient
+    try:
+        out = NexusAIClient().transform({
+            "provider": config.provider, "model_id": config.model_id,
+            "api_key": config.get_api_key(), "api_base": config.api_base,
+            "prompt": prompt,
+            "max_tokens": config.max_output_tokens, "temperature": 0.2,
+        })
+    except Exception:  # noqa: BLE001 — an unreachable engine is a 502, not a stack trace
+        raise HttpError(502, "The server could not reach the model.")
+    if not out.get("ok"):
+        raise HttpError(502, f"The model could not answer ({out.get('error_code') or 'error'}).")
+    usage = out.get("usage") or {}
+    _record_investigate_usage(company, project, config, request.auth, payload.topic_id or "", usage)
+    return {
+        "answer": out.get("text") or "",
+        "runs_examined": runs_in,
+        "model_name": config.name,
+        "usage": {"prompt_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens")},
+    }
+
+
+def _record_investigate_usage(company, project, config, user, topic_id: str, usage: dict) -> None:
+    """Billed like a chain model step; billing must never fail the answer."""
+    try:
+        from django.utils import timezone
+
+        from intelligence.pricing import price_record
+        from nucleus.models import UsageRecord
+
+        record = {
+            "company_id": str(company.id), "project_id": str(project.id),
+            "topic_id": topic_id, "persona_id": "",
+            "user_id": str(user.id),
+            "message_id": "", "job_id": f"audit-investigate:{project.id}",
+            "kind": "chat_reply", "model_config_id": str(config.id),
+            "provider": config.provider, "model_id": config.model_id, "role": "STANDARD",
+            "provider_response_id": usage.get("provider_response_id"),
+            "source": "audit_investigate",
+            "input_tokens": int(usage.get("input_tokens") or 0),
+            "uncached_input_tokens": int(usage.get("uncached_input_tokens") or 0),
+            "cache_read_tokens": int(usage.get("cache_read_tokens") or 0),
+            "cache_write_5m_tokens": int(usage.get("cache_write_5m_tokens") or 0),
+            "cache_write_1h_tokens": int(usage.get("cache_write_1h_tokens") or 0),
+            "output_tokens": int(usage.get("output_tokens") or 0),
+            "reasoning_tokens": int(usage.get("reasoning_tokens") or 0),
+            "finish_reason": usage.get("finish_reason"),
+            "estimated": bool(usage.get("estimated")),
+            "called_at": timezone.now(),
+        }
+        UsageRecord.objects.create(**{**record, **price_record(record)})
+    except Exception:  # noqa: BLE001
+        logger.exception("[audit] could not record the investigate call's usage")
 
 
 # ── Output Types (M7) ─────────────────────────────────────────────────────────

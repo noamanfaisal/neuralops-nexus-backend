@@ -1123,3 +1123,93 @@ class AuditLogTests(MentionRightFixture):
         r = self.call("get", "/api/v1/ai-request-logs/", self.owner)
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(len(r.json()), 1)
+
+
+class InvestigateAuditTests(MentionRightFixture):
+    """1.3.0's deferred half — "investigate with a model": ask a model about
+    the log from inside it. Same right as reading; the model must be attached
+    to the project; the answer is ephemeral; billed as audit_investigate."""
+
+    # the engine-write helper, borrowed — subclassing AuditLogTests would
+    # re-run its whole suite here
+    write_log = AuditLogTests.write_log
+
+    def setUp(self):
+        super().setUp()
+        from nucleus.models import ModelConfig
+        self.inspector = ModelConfig.objects.create(
+            company=self.company, name="Inspector", provider="openai",
+            model_id="gpt-4o-mini", context_window=128000)
+        self.inspector.set_api_key("sk-inspector")
+        self.inspector.save(update_fields=["api_key_encrypted"])
+        self.inspector.projects.add(self.p1)
+
+    def investigate(self, user, **overrides):
+        from unittest.mock import patch as _patch
+        body = {"question": "Why did the reply use retrieval?",
+                "model_config_id": str(self.inspector.id)}
+        body.update(overrides)
+        with _patch("chat.nexus_ai.NexusAIClient.transform", return_value={
+            "ok": True, "text": "The run pulled auth.py at 0.71.",
+            "usage": {"input_tokens": 900, "output_tokens": 40},
+        }) as transform:
+            r = self.call("post", f"/api/v1/projects/{self.p1.id}/audit/investigate/", user, body)
+        return r, transform
+
+    def test_the_owner_asks_and_the_log_rides_the_prompt(self):
+        self.write_log()
+        r, transform = self.investigate(self.owner)
+        self.assertEqual(r.status_code, 200, r.content)
+        out = r.json()
+        self.assertEqual(out["answer"], "The run pulled auth.py at 0.71.")
+        self.assertEqual(out["runs_examined"], 1)
+        self.assertEqual(out["model_name"], "Inspector")
+        payload = transform.call_args.args[0]
+        # the model gets the anatomy — sections, retrieval, response — and the
+        # question, with the stored key riding server-side only
+        self.assertIn("You are S.", payload["prompt"])
+        self.assertIn("auth.py", payload["prompt"])
+        self.assertIn("the reply", payload["prompt"])
+        self.assertIn("Why did the reply use retrieval?", payload["prompt"])
+        self.assertEqual(payload["api_key"], "sk-inspector")
+        # … and the call billed as audit_investigate
+        from nucleus.models import UsageRecord
+        rec = UsageRecord.objects.filter(source="audit_investigate").first()
+        self.assertIsNotNone(rec)
+        self.assertEqual((rec.input_tokens, rec.output_tokens), (900, 40))
+        self.assertEqual(rec.kind, "chat_reply")
+
+    def test_the_walls_hold(self):
+        from nucleus.models import ModelConfig
+        self.write_log()
+        # a Member (no project.audit) is refused
+        r, transform = self.investigate(self.sara)
+        self.assertEqual(r.status_code, 403, r.content)
+        transform.assert_not_called()
+        # a model NOT attached to the project is refused with the reason
+        loose = ModelConfig.objects.create(company=self.company, name="Loose",
+                                           provider="openai", model_id="o3")
+        r, transform = self.investigate(self.owner, model_config_id=str(loose.id))
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("not attached", r.json()["detail"])
+        transform.assert_not_called()
+        # an empty scope answers 404, never a model call
+        r, transform = self.investigate(self.owner, topic_id="no-such-topic")
+        self.assertEqual(r.status_code, 404)
+        transform.assert_not_called()
+        # an empty question is a 400
+        r, transform = self.investigate(self.owner, question="   ")
+        self.assertEqual(r.status_code, 400)
+        transform.assert_not_called()
+
+    def test_an_engine_refusal_is_a_worded_502_and_nothing_bills(self):
+        from unittest.mock import patch as _patch
+        self.write_log()
+        with _patch("chat.nexus_ai.NexusAIClient.transform",
+                    return_value={"ok": False, "error": "bad key", "error_code": "model_failure"}):
+            r = self.call("post", f"/api/v1/projects/{self.p1.id}/audit/investigate/", self.owner,
+                          {"question": "why?", "model_config_id": str(self.inspector.id)})
+        self.assertEqual(r.status_code, 502, r.content)
+        self.assertIn("model_failure", r.json()["detail"])
+        from nucleus.models import UsageRecord
+        self.assertFalse(UsageRecord.objects.filter(source="audit_investigate").exists())

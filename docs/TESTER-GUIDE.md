@@ -317,6 +317,15 @@ keyed provider → the register is refused by the provider check in words —
 nothing saved. Only a model REGISTRATION card has the field; a create_persona
 or write_file card never does.
 
+**T-44i — Investigate the audit log with a model.** As an admin, open "How
+replies here are built" on a topic with a few AI replies. Atop the runs:
+**Investigate with a model** — a question box and a picker offering ONLY the
+models attached to this project. Ask "why did the router escalate?" — expect
+a concrete answer naming runs, with "Answered by … · examined N runs · this
+answer is not stored anywhere" under it. Reload: the answer is gone (it is
+never stored). The Usage page gains one chat-reply row for the call. As a
+MEMBER: no audit dialog at all, and the API refuses (403).
+
 **T-44f — Memory embedder (§2.11).** As the company owner, open a project's
 overview pane. Expect a **Memory embedder** section after the spend limit,
 reading "System default — FastEmbed (local)". Pick **OpenAI-compatible
