@@ -1245,6 +1245,27 @@ lesson 14) and rebuild the image — fold into the next image build.
   one-click connects — the last piece, blocked on the vendor OAuth apps
   (portal-side).
 
+- **DATA POD — large CSV analytics (owner's ask 2026-10-30: "we will make
+  one runpod with duckdb + minio to handle large csv") — CODE BUILT
+  2026-10-30; the owner deploys the pod.** New `data-pod/` in the repo: one
+  docker compose (MinIO + a Python MCP server — FastMCP streamable-http on
+  :8900/mcp behind a bearer wall, DATAPOD_TOKEN = the server dialog's
+  client_secret). Tools, split for the approval gate: READS (readOnlyHint)
+  list_files · describe_file · run_sql (SELECT-shaped ONLY — a keyword wall
+  refuses writes/DDL/COPY; ≤500 rows, ≤~60k chars, fresh in-memory DuckDB
+  per call reading s3:// straight from MinIO so only touched bytes move);
+  WRITES (pause on cards) upload_url (presigned 1-h PUT — the big file goes
+  person→pod, never through chat or the model) · export_result (COPY a
+  SELECT's full result to a new .csv/.parquet + download link). Presigned
+  links sign against S3_PUBLIC_ENDPOINT (RunPod proxy address) while the pod
+  itself uses the internal address. Catalog gained a "Large CSV analytics
+  (Data Pod)" tile (Data category, static_secrets — house glyph, no brand
+  mark). server.py syntax-checked; the pod's own smoke run is the owner's
+  deploy (README: cp .env.example .env → compose up → add server → Refresh
+  tools → attach to personas). LATER IF WANTED: per-project buckets/tokens,
+  parquet auto-conversion of hot CSVs, a size-capped upload road from the
+  Files pane.
+
 - MCP connector toggles ship WITH the bundled connectors (scope ruling: no
   dead switches) — MCP track.
 - **Model Edit dialog — RULED (owner, 2026-10-28): lock Save until the

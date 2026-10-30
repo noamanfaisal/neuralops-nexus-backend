@@ -1,0 +1,53 @@
+# NeuralOps DATA POD — one box holding a team's big CSVs (MinIO) and
+# answering SQL about them (DuckDB), attached to NeuralOps as an MCP server.
+# Runs anywhere docker does: a RunPod, a VPS, the same host as NeuralOps.
+#
+#   cp .env.example .env     # set the three secrets
+#   docker compose up -d
+#
+# Then in NeuralOps: Intelligence → MCP tab → Add server → transport http,
+# URL  http://<this box>:8900/mcp , auth static secrets, client_secret =
+# DATAPOD_TOKEN. Attach it to the personas that should see the data.
+#
+# PORTS: 8900 = the MCP server (NeuralOps dials this). 9000 = MinIO's S3
+# API — expose it only if people will use presigned upload/download links
+# (S3_PUBLIC_ENDPOINT must then be this box's public address for port 9000).
+# 9001 = the MinIO web console, handy for dragging files in by hand.
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET:?set S3_SECRET in .env}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  datapod:
+    build: .
+    environment:
+      DATAPOD_TOKEN: ${DATAPOD_TOKEN:?set DATAPOD_TOKEN in .env}
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
+      S3_KEY: ${S3_KEY:-minioadmin}
+      S3_SECRET: ${S3_SECRET:?set S3_SECRET in .env}
+      S3_BUCKET: ${S3_BUCKET:-datapod}
+    ports:
+      - "${DATAPOD_PORT:-8900}:8900"
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  minio-data:
