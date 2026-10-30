@@ -527,11 +527,28 @@ download via an authorised fetch → blob), part 2 one-time download tickets
 limit), part 4 live HTML preview on a SEPARATE origin (owner's security
 ruling first).
 
-## 4. Embedder setting + rebuild banner (FRONTEND-REVAMP §2.11) — TO VERIFY
+## 4. Embedder setting + rebuild banner (FRONTEND-REVAMP §2.11) — **BUILT 2026-10-30**
 
 Nucleus half built (GET/PUT /projects/{id}/embedder/, reindex_status).
-Whether the frontend project-settings row and the "memory is being rebuilt"
-banner exist has NOT been verified — check before building. Small-medium.
+Verified 2026-10-30: the frontend half did NOT exist — built the same night.
+**BUILT:** an **EmbedderSection** on the project overview pane (under the
+spend limit): System default (local FastEmbed) / FastEmbed with a chosen
+model / OpenAI-compatible endpoint (model id + API base + key), Save &
+rebuild memory, a polled (5 s) "memory is being rebuilt" banner while
+reindex_status=building with every control disabled, a "last rebuild
+failed — saving retries" note, a read-only description without
+project.embedder, and "needs a newer server" on a 404. Hooks
+useProjectEmbedder/useSetProjectEmbedder; api workspace.ts
+getProjectEmbedder/setProjectEmbedder. **HOLE CLOSED riding along:** the
+embedder GET/PUT echoed the stored api_key to ANY project member — now
+masked server-side (_embedder_out: has_api_key only, the key never leaves),
+and the key is WRITE-ONLY with kept-on-omit, same rule as model configs.
+TESTS: nucleus workspace/tests_embedder.py +1 (write-only + kept-on-omit +
+never echoed) + the read pin updated; frontend project-overview-pane +4
+(no-right description, save + PUT body + banner + disabled controls,
+failed note + stored-key placeholder + key stays out of the body, older
+server); test ALL_RIGHTS + project.embedder. The chat side already worded
+the refusal (code "reindexing") — nothing to add there.
 
 ## 5. Local (offline) login UI — PARKED (owner, 2026-10-18)
 
@@ -1038,9 +1055,33 @@ lesson 14) and rebuild the image — fold into the next image build.
   the hard rules, separator-id exception incl. the native-provider wall
   held); frontend models-tab (tile pre-fill + notes + legal separator id,
   keyless/private Ollama wording). OWNER before release: try each preset
-  against the real provider once — endpoints and free tiers move; WP3
-  (register_model + secure key card) and WP4 (one-click connects) still
-  ride the setup-copilot week.
+  against the real provider once — endpoints and free tiers move.
+  **Part 3 (WP3) — THE SECURE KEY CARD — BUILT 2026-10-30, exactly as the
+  hard rules demand.** The inside create_model (setup capability) pauses on
+  its approval card like every setup write; the CARD carries a write-only
+  password field ("Provider API key — typed here, never into the chat";
+  empty = keyless endpoints). The typed key's whole life: the decision POST
+  (ToolApprovalDecisionIn.secret) → an in-process one-time hand-off
+  (chat/approvals.stash_secret/take_secret, 300 s TTL — NEVER in
+  PausedRun.decisions, message metadata or any event; a process restart in
+  the ms-wide window loses the key safely: the register runs keyless and the
+  provider check refuses in words) → the resume's approvals[call].secret
+  (relay.resume_paused_run, internal POST) → the engine's
+  DeferredToolResults.metadata → ctx.tool_call_metadata in
+  setup_tools.create_model → the gateway's api_key argument → encrypted at
+  rest, has_api_key in results. It is never a tool argument, so it cannot
+  enter the run state, the history, the audit anatomy or the memory store;
+  history records only the card ("… wants to register a model · Allowed").
+  GUARDS: a key on a deny is 400; a key on any held call that is not a setup
+  create_model is 400 (a credential is never silently dropped); length cap.
+  Card expiry rides the existing pause-expiry rule unchanged. TESTS: engine
+  test_setup_tools st6 (pause → resume-with-secret → gateway got api_key;
+  the secret in ZERO provider requests); nucleus chat/tests.py
+  SecretKeyCardTests (rides the resume, stored nowhere, one-time take; the
+  three refusals); frontend approval-row — 3 new card tests (field only on a
+  setup registration, trimmed key rides Allow, empty = no key, Deny never
+  sends one, no field for a reader who cannot decide). WP4 (one-click
+  connects) still rides the setup-copilot week.
 
 - **MCP suggest-attach — RULED (owner, 2026-10-22 17:34: "option 2").** The
   persona may SEE the names + descriptions of the project's other MCP
@@ -1116,12 +1157,35 @@ lesson 14) and rebuild the image — fold into the next image build.
   never re-checks, a reach change does, with the stored key; persona create/
   update/list with rights; members + topic transcript incl. ai_only + rename/
   archive/restore tiers) + the tools/list pin now names all 18.
-  STILL ON THE SETUP-COPILOT WEEK: the secure key card (WP3 — the IN-CHAT
-  road where a persona proposes register_model and the key is typed on an
-  approval card, never in a message; the gateway road above is key-as-
-  argument by the owner's ruling), WP4 one-click connects, mounting these
-  tools INSIDE for personas via InternalActor, and audit "investigate with
-  a model".
+  **MOUNTED INSIDE FOR PERSONAS — BUILT 2026-10-30 (the InternalActor door,
+  exactly as ruled: one door, one rights rule, both worlds).** A persona
+  whose internal capability row carries the **`setup`** key (the mcp-tab's
+  built-in-capabilities dialog gained a "Server setup" checkbox — attach the
+  row to the persona like any other) gets the ten admin tools INSIDE chat:
+  engine `tools/setup_tools.py` is a FunctionToolset bound per reply to the
+  ACTING person (job.user_id → X-NeuralOps-User + the internal key), every
+  call forwarded to nucleus's own gateway (POST /api/v1/mcp/ tools/call), so
+  the gateway's permission checks run AS that person — a missing right is a
+  worded refusal. Mounted as a native-like capability (registry NATIVE_TOOLS
+  "setup"; ToolsetBuilder wraps it in the framework's Toolset with id
+  "setup"), so the approval gate applies: the SIX WRITES
+  (create/update_model, create/update_persona, create/update_topic) are
+  ACTING_NATIVE_TOOLS["setup"] — an interactive run pauses on the card, an
+  unattended one refuses in words. **THE KEY RULE HOLDS BY SHAPE:** the
+  inside create_model/update_model have NO api_key parameter at all — a key
+  pasted in chat has nowhere to go; keyless providers (Ollama) register end
+  to end, keyed ones are handed to the Register dialog until WP3's card.
+  A gateway isError returns as "… refused: … Nothing changed." (honesty
+  rule). TESTS: engine tests/test_setup_tools.py st1–st5 (headers + acting
+  person + result round-trip, write pauses with the card and the gateway
+  never called, unattended refusal, no-api_key-by-shape + exactly the ten
+  tools, refusal as honest text); frontend mcp-capabilities "Server setup"
+  entry pinned. Engine suite 150 passed / 5 skipped.
+  ~~The secure key card (WP3)~~ **BUILT 2026-10-30** — see the free-LLM
+  entry's Part 3 record above (the in-chat register_model road; the gateway
+  road stays key-as-argument by the owner's ruling). STILL ON THE
+  SETUP-COPILOT WEEK: WP4 one-click connects and audit "investigate with a
+  model".
 
 - MCP connector toggles ship WITH the bundled connectors (scope ruling: no
   dead switches) — MCP track.
@@ -1136,6 +1200,15 @@ lesson 14) and rebuild the image — fold into the next image build.
   survives a reload (nucleus field + migration, set by the check endpoint).
   Tests: never-checked → Save locked; check passes → unlocked; checked model
   + rename → Save enabled; checked model + new key → locked until re-check.
+  **BUILT (verified in code + green suites 2026-10-30).**
+  `ModelConfig.last_check_ok_at` (migration **0043_model_check_stamp**), set
+  ONLY by a passing check of the stored config (services.py stamps on pass;
+  a reach change clears it), serialized on ModelConfigOut; the edit dialog
+  locks Save (never-passed or reach changed) with the "Check the model
+  first" hint and unlocks on a pass — older servers without the field keep
+  Save enabled (supportsLock guard). Tests: nucleus intelligence/tests.py
+  (stamp/clear/serialize matrix) + frontend models-tab (lock matrix per the
+  ruling).
 - gpt-5.x pricing rows in the price catalog — watch the Usage page's
   unpriced_rows (≥) on new models; the catalog refresh task may lag new ids.
 
@@ -1180,6 +1253,15 @@ lesson 14) and rebuild the image — fold into the next image build.
   should only see the escalated run's answer. Test: a routing run that
   streams "Handing it over." then returns Escalate leaves no trace of that
   sentence in the final message.
+  **BUILT (verified in code + green suites 2026-10-30).** FIX 0: the saved
+  reply is the LAST run's text only (reply_generator.full_text) and the
+  deep_escalation event clears the live bubble (relay → message-store, its
+  test pins the exact live scenario). FIX 1: event_mapper inserts a line
+  break when a second text part begins after a tool call. FIX 2:
+  markers._GLUED_OPENER accepts an opener glued to sentence punctuation —
+  ot10 covers chart AND table, every marker type goes through the same road.
+  FIX 3: frontend stripLeakedMarkers + the autolink guard (directives.ts)
+  so `<OUTPUT:…>` never renders as a link and stray markers are stripped.
 
 - **BUG (found live 2026-10-27): the persona's "Default answer format" is
   ignored.** @Analyst is set to Text, yet "@Analyst how did revenue this
@@ -1194,6 +1276,11 @@ lesson 14) and rebuild the image — fold into the next image build.
   to Auto keeps today's behaviour. Tests: Text persona + "compare X with Y"
   → text; same persona + "@chart" → chart; Auto persona → classifier.
   Workaround today: add `@text` to the message.
+  **BUILT (verified in code + green suites 2026-10-30).** resolve_output_spec
+  takes persona_default; order: message directive → persona default (when
+  not Auto) → classifier → text; unknown value logs and falls through to the
+  classifier. Tests ot12 (unit, incl. " Auto " and a junk value) and ot13
+  (end-to-end through the trigger).
 
 - **CHECK (seen live 2026-10-27, 20:59 and 21:41): "The model provider
   returned a server error" appears together with an approval card**, twice
@@ -1204,3 +1291,9 @@ lesson 14) and rebuild the image — fold into the next image build.
   (RequestDataTooBig / 413 on the pause POST at those times). If so: when the
   pause cannot be saved, say that ("Couldn't hold this step for approval")
   and never blame the model provider.
+  **CONFIRMED + BUILT (verified in code + green suites 2026-10-30).** It was
+  the pause save, not the provider: fake_nucleus reproduces the bare 500
+  (RequestDataTooBig shape); ai_system raises "Couldn't hold this step for
+  approval — the run's state …" on a failed pause POST (test_approvals
+  pins it), and chat/reasons.py maps that wording through to the bubble
+  instead of the provider-error line (chat/tests_reasons.py).

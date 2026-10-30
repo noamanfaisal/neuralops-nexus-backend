@@ -87,6 +87,11 @@ class PreflightDecisionOut(Schema):
 class ToolApprovalDecisionIn(Schema):
     decision: str  # allow | deny
     always: bool = False  # allow, and set that tool to Auto on the persona
+    # WP3 secure key card: a write-only secret typed ON THE CARD (today: the
+    # API key of a held setup create_model). Accepted only on allow and only
+    # for that call; held in process memory until the resume consumes it —
+    # NEVER stored on the run, the message or anywhere else.
+    secret: Optional[str] = None
 
 
 class ToolApprovalDecisionOut(Schema):

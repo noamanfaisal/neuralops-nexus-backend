@@ -64,7 +64,8 @@ from ai_engine.pydantic_ai_system.model_factory import ModelFactory
 from ai_engine.pydantic_ai_system.reply_generator import ReplyGenerator
 from ai_engine.pydantic_ai_system.tools.call_persona import call_persona_toolset
 from ai_engine.pydantic_ai_system.tools.nudge_gate import NudgeGate
-from ai_engine.pydantic_ai_system.tools.registry import ToolRegistry
+from ai_engine.pydantic_ai_system.tools.registry import ToolRegistry, normalize_key
+from ai_engine.pydantic_ai_system.tools.setup_tools import setup_toolset
 from ai_engine.pydantic_ai_system.tools.toolset_builder import ToolsetBuilder
 from ai_engine.pydantic_ai_system.usage_reader import UsageReader, estimate_tokens
 from ai_engine.vector_db.store import VectorStore
@@ -172,6 +173,18 @@ class PydanticAISystem:
                         if persona.delegation_enabled and job.delegation_depth == 0
                         and not preflight_turn else None)
 
+            # Setup-copilot: the gateway's admin tools, mounted INSIDE when a
+            # capability row carries the `setup` key — one FunctionToolset per
+            # reply, bound to the ACTING person (job.user_id → the InternalActor
+            # door's X-NeuralOps-User; rights are theirs, writes still pause on
+            # the approval gate like every acting native tool).
+            setup = None
+            if any(normalize_key(k) == "setup"
+                   for row in persona.capabilities
+                   for k in (row.get("capability_config") or {})):
+                setup = setup_toolset(self._settings.nucleus_url,
+                                      self._settings.internal_key, job.user_id or "")
+
             # W8: only a run someone can steer polls for nudges; the gate only
             # fires after tool calls, so it rides with the capabilities.
             nudge_gate = (NudgeGate(job.msg_id,
@@ -194,7 +207,7 @@ class PydanticAISystem:
                 ).target
                 caps = self._toolsets.build(loaded_set, catalog, persona,
                                             interactive=job.interactive, clearances=clearances,
-                                            compaction_target=target)
+                                            compaction_target=target, setup_tools=setup)
                 if caps and nudge_gate is not None:
                     caps = list(caps) + [nudge_gate]
                 return caps

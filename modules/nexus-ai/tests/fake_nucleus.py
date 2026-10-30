@@ -84,6 +84,10 @@ class FakeNucleus:
         self.nudges: dict[str, list[str]] = {}  # W8: msg_id → waiting texts (taken once)
         self.personas: dict[str, dict] = {}   # item 46: extra personas by id (callees)
         self.audit_posts: list[dict] = []     # 1.3.0: every POST to /ai-request-logs/
+        # setup-copilot: every tools/call on the fake gateway (name, arguments,
+        # the X-NeuralOps-User header) + scripted results by tool name.
+        self.mcp_calls: list[dict] = []
+        self.mcp_results: dict[str, dict] = {}
 
     def reset(self) -> None:
         self.persona = {}
@@ -96,6 +100,8 @@ class FakeNucleus:
         self.nudges = {}
         self.personas = {}
         self.audit_posts.clear()
+        self.mcp_calls.clear()
+        self.mcp_results = {}
 
     async def get_persona(self, request: Request) -> JSONResponse:
         # item 46: a callee persona is served by its id; the default persona
@@ -128,6 +134,25 @@ class FakeNucleus:
         msg_id = request.path_params["msg_id"]
         return JSONResponse({"nudges": self.nudges.pop(msg_id, [])})
 
+    async def post_mcp(self, request: Request) -> JSONResponse:
+        """setup-copilot: the gateway MCP endpoint's fake — records every
+        tools/call with its InternalActor headers and answers the scripted
+        result (default: an ok text)."""
+        body = await request.json()
+        params = body.get("params") or {}
+        self.mcp_calls.append({
+            "method": body.get("method"),
+            "name": params.get("name"),
+            "arguments": params.get("arguments") or {},
+            "user": request.headers.get("X-NeuralOps-User", ""),
+            "internal_key": request.headers.get("X-Internal-Key", ""),
+        })
+        result = self.mcp_results.get(params.get("name") or "", {
+            "content": [{"type": "text", "text": "GATEWAY-OK: done"}],
+            "isError": False,
+        })
+        return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"), "result": result})
+
     async def post_pause(self, request: Request) -> JSONResponse:
         if self.pause_status != 201:
             # the real failure shape: RequestDataTooBig surfaced as a bare 500
@@ -144,6 +169,7 @@ def make_app(nucleus: FakeNucleus) -> Starlette:
         Route("/api/v1/internal/topics/{topic_id}/history/", nucleus.get_history, methods=["GET"]),
         Route("/api/v1/internal/usage/", nucleus.post_usage, methods=["POST"]),
         Route("/api/v1/internal/ai-request-logs/", nucleus.post_audit, methods=["POST"]),
+        Route("/api/v1/mcp/", nucleus.post_mcp, methods=["POST"]),
         Route("/api/v1/internal/messages/{msg_id}/pause/", nucleus.post_pause, methods=["POST"]),
         Route("/api/v1/internal/messages/{msg_id}/nudges/", nucleus.get_nudges, methods=["GET"]),
     ])

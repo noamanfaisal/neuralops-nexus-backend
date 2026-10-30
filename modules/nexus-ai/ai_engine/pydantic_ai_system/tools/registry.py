@@ -27,6 +27,10 @@ NATIVE_TOOLS: dict[str, tuple[str, bool | None]] = {
     "web_search": ("Search the web", True),
     "web_fetch": ("Fetch a web page and read it", True),
     "thinking": ("Think longer before answering", True),
+    # setup-copilot: the gateway's admin tools mounted inside (setup_tools.py) —
+    # mixed read/write, so no blanket read-only hint; the split lives in
+    # ACTING_NATIVE_TOOLS["setup"].
+    "setup": ("Manage this server's models, personas, users and topics — always as the person who asked", None),
 }
 
 

@@ -39,6 +39,7 @@ from pydantic_ai.capabilities import (
     LocalWorkspace,
     PrefixTools,
     Thinking,
+    Toolset,
     ToolSearch,
     WebFetch,
     WebSearch,
@@ -75,7 +76,12 @@ class ToolsetBuilder:
     def build(self, loaded: LoadedSet, catalog: list[ToolCatalogEntry],
               persona: PersonaSpec, *, interactive: bool = True,
               clearances: frozenset[str] | set[str] = frozenset(),
-              compaction_target: int | None = None) -> list:
+              compaction_target: int | None = None,
+              setup_tools=None) -> list:
+        """setup_tools: the gateway-admin FunctionToolset (setup_tools.py),
+        built by the CALLER because it is bound to the reply's acting person
+        (job.user_id). Mounted only when the persona's capability rows carry
+        the `setup` key; None with the key present is skipped loudly."""
         loaded_ids = set(loaded.tool_ids)
         eligible_ids = {entry.tool_id for entry in catalog}
         capabilities: list = []
@@ -87,6 +93,16 @@ class ToolsetBuilder:
         for key, config in configs.items():
             if key not in eligible_ids:
                 continue  # explicitly off — out of the catalog entirely
+            if key == "setup":
+                # setup-copilot: the gateway's admin tools, mounted inside as a
+                # native-like capability — the gate's ACTING set makes the six
+                # writes ask while the list tools run silently.
+                if setup_tools is None:
+                    log.warning("setup capability present but no setup toolset was built — skipped")
+                    continue
+                capabilities.append(Toolset(setup_tools, id="setup"))
+                sources["setup"] = ToolSource(kind="native", cap_key="setup", source_id="setup")
+                continue
             builder = _NATIVE_BUILDERS.get(key)
             if builder is None:
                 log.warning("unknown native capability %r — skipped", key)

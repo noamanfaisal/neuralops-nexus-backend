@@ -59,7 +59,30 @@ class EmbedderEndpointTests(MentionRightFixture):
         Project.objects.filter(id=self.p1.id).update(embedder=SPEC, reindex_status="failed")
         r = self.call("get", f"/api/v1/projects/{self.p1.id}/embedder/", self.owner)
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertEqual(r.json(), {"embedder": SPEC, "reindex_status": "failed"})
+        self.assertEqual(r.json(), {"embedder": {**SPEC, "has_api_key": False},
+                                    "reindex_status": "failed"})
+
+    def test_the_key_is_write_only_and_kept_when_omitted(self):
+        """Same rule as model configs: the key goes IN as a field, never comes
+        back out (has_api_key only), and a re-save without it keeps the
+        stored one — editing the model id must not wipe the key."""
+        r, _ = self.put(self.owner, {"embedder": {**SPEC, "api_key": "sk-embed-secret"}})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertNotIn("sk-embed-secret", r.content.decode())
+        self.assertTrue(r.json()["embedder"]["has_api_key"])
+        self.p1.refresh_from_db()
+        self.assertEqual(self.p1.embedder["api_key"], "sk-embed-secret")
+        # a later save WITHOUT the key keeps the stored one
+        Project.objects.filter(id=self.p1.id).update(reindex_status="")
+        r, _ = self.put(self.owner, {"embedder": {**SPEC, "model_id": "text-embedding-3-large"}})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.p1.refresh_from_db()
+        self.assertEqual(self.p1.embedder["api_key"], "sk-embed-secret")
+        self.assertEqual(self.p1.embedder["model_id"], "text-embedding-3-large")
+        # and the GET never shows it either
+        r = self.call("get", f"/api/v1/projects/{self.p1.id}/embedder/", self.owner)
+        self.assertNotIn("sk-embed-secret", r.content.decode())
+        self.assertTrue(r.json()["embedder"]["has_api_key"])
 
     def test_personas_are_refused_while_the_project_rebuilds(self):
         Project.objects.filter(id=self.p1.id).update(reindex_status="building")

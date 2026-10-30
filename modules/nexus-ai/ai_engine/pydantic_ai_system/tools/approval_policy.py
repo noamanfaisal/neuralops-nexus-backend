@@ -34,6 +34,11 @@ LEVELS = ("auto", "ask", "off")
 ACTING_NATIVE_TOOLS: dict[str, set[str]] = {
     "shell": {"run_command", "start_command", "stop_command"},
     "filesystem": {"write_file", "edit_file", "create_directory"},
+    # setup-copilot (setup_tools.py): the gateway admin tools mounted inside.
+    # Every write asks — a model/persona/topic change is an act on the server;
+    # the list_* tools and the transcript read run silently.
+    "setup": {"create_model", "update_model", "create_persona",
+              "update_persona", "create_topic", "update_topic"},
 }
 
 PREVIEW_CHARS = 300

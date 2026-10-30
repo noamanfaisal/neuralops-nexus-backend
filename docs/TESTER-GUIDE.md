@@ -293,6 +293,43 @@ registering a model or creating a persona is refused in words; renaming a
 topic works; archiving one is refused. Everything acts AS the token's
 person — nothing here outruns the app's own rights.
 
+**T-44g — Setup tools inside a persona.** In a project, open the MCP tab →
+add built-in capabilities → tick **Server setup** → attach the row to a
+persona (the catalogue's Guide is the natural one). In chat, ask that
+persona "@Guide what models are registered here?" — expect a real list
+(never a key; has_api_key only). Ask it to "create a persona called Scout"
+— expect an APPROVAL CARD first (nothing happens until you approve); approve
+and the persona appears under the project. As a MEMBER, ask it to register
+a model — expect a worded refusal (your rights, not the persona's). Ask it
+to register an OpenAI model with your key pasted in chat — expect it to
+REFUSE the pasted key (and tell you to revoke it). A keyless local Ollama
+registers end to end from chat, terms + provider check included.
+
+**T-44h — The secure key card (WP3).** Ask the setup persona to register a
+keyed model (say Groq): expect the approval card to carry a PASSWORD field
+("Provider API key — typed here, never into the chat"). Type the key there
+and Allow. Expect: the model registers (provider check passes), the Models
+tab shows it with a stored key, and the key appears NOWHERE — not in the
+message, not in the card after deciding, not in the AI audit log's anatomy
+for that reply, not in a reload of the chat. Deny with a key typed → a
+worded refusal (a key only rides an allow). Allow with the field EMPTY on a
+keyed provider → the register is refused by the provider check in words —
+nothing saved. Only a model REGISTRATION card has the field; a create_persona
+or write_file card never does.
+
+**T-44f — Memory embedder (§2.11).** As the company owner, open a project's
+overview pane. Expect a **Memory embedder** section after the spend limit,
+reading "System default — FastEmbed (local)". Pick **OpenAI-compatible
+endpoint**, give a model id (and base/key if you have one), click **Save &
+rebuild memory**. Expect: an amber "memory is being rebuilt" banner, every
+embedder control disabled, and @mentions in that project refused in words
+until the rebuild ends (the banner clears itself — the pane polls). Re-open
+the section afterwards: the key field says "A key is stored — leave empty
+to keep it" and the key itself NEVER appears anywhere (check the network
+tab: the GET carries has_api_key, no key). As a MEMBER: the section is a
+one-line description, no controls. If the rebuild fails, the section says
+so and saving again retries.
+
 ## 13. Usage and costs
 
 **T-45 — Usage page.** After the tests above, open Usage.

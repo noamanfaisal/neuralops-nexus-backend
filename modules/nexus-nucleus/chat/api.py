@@ -523,7 +523,7 @@ async def decide_tool_approval(request, project_id: str, channel_id: str, topic_
     """
     _company, user, _project, _channel, topic = await _resolve_topic(request, project_id, channel_id, topic_id)
     try:
-        return await chat_svc.decide_tool_approval(topic=topic, message_id=message_id, call_id=call_id, user=user, decision=payload.decision, always=payload.always)
+        return await chat_svc.decide_tool_approval(topic=topic, message_id=message_id, call_id=call_id, user=user, decision=payload.decision, always=payload.always, secret=payload.secret)
     except chat_svc.ApprovalError as exc:
         raise HttpError(exc.status, str(exc))
 

@@ -365,12 +365,18 @@ def _deferred_results(resume: ResumeBlock) -> DeferredToolResults:
     # item 5: a question's answer IS the tool result
     calls: dict = dict(resume.answers or {})
     approvals: dict = {}
+    # WP3 secure key card: a secret typed on the approval card rides to the
+    # ONE approved call as RunContext metadata (ctx.tool_call_metadata) —
+    # never as tool args, so it never enters the run state or the history.
+    metadata: dict[str, dict] = {}
     for call_id, decision in resume.approvals.items():
         if decision.decision == "allow":
             approvals[call_id] = ToolApproved()
+            if (decision.secret or "").strip():
+                metadata[call_id] = {"secret": decision.secret.strip()}
         else:
             approvals[call_id] = ToolDenied(decision.reason or DENIED)
-    return DeferredToolResults(approvals=approvals, calls=calls)
+    return DeferredToolResults(approvals=approvals, calls=calls, metadata=metadata)
 
 
 def _base_record(request: ReplyRequest, spec: ModelSpec) -> UsageRecord:

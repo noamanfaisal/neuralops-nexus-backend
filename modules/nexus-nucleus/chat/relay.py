@@ -216,6 +216,14 @@ async def resume_paused_run(message_id: str) -> None:
             answers[call_id] = d.get("answer") or ""
         else:
             approvals[call_id] = {"decision": d.get("decision") or "deny", "reason": d.get("reason")}
+            if approvals[call_id]["decision"] == "allow":
+                # WP3 secure key card: a key typed on the card was handed off
+                # IN MEMORY (approvals.stash_secret) — consumed exactly once
+                # here, rides the internal resume POST only, never a row.
+                from chat.approvals import take_secret
+                held = take_secret(message_id, call_id)
+                if held:
+                    approvals[call_id]["secret"] = held
     job["resume"] = {"state": run.state, "approvals": approvals, "answers": answers, "role": run.role or "STANDARD"}
 
     # The decisions are in the job now; the parked state is consumed.

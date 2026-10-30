@@ -24,6 +24,12 @@ class ApprovalDecisionIn(BaseModel):
 
     decision: str  # "allow" | "deny"
     reason: str | None = None  # deny only; defaults to the standard denial text
+    # WP3 secure key card: a secret the approver typed ON THE CARD (today:
+    # the API key of a setup create_model). It rides this internal POST in
+    # memory only — nucleus never stores it, the engine hands it to the one
+    # approved call as RunContext metadata (never as tool args, so it never
+    # enters the run state or the message history) and forgets it.
+    secret: str | None = None
 
 
 class ResumeBlock(BaseModel):

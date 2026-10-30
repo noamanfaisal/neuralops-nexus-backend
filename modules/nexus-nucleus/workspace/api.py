@@ -150,6 +150,18 @@ class EmbedderIn(Schema):
     embedder: Optional[dict] = None
 
 
+def _embedder_out(spec):
+    """The spec as a reader may see it — the stored api_key NEVER leaves the
+    server (the same rule as model configs: responses carry has_api_key
+    only). Any project member may read the embedder; only the key is
+    privileged."""
+    if not spec:
+        return None
+    out = {k: v for k, v in spec.items() if k != "api_key"}
+    out["has_api_key"] = bool(spec.get("api_key"))
+    return out
+
+
 @router.get("/{project_id}/embedder/", response=dict)
 def get_project_embedder(request, project_id: str):
     """The project's embedder spec (null = the system default, local fastembed)
@@ -158,7 +170,7 @@ def get_project_embedder(request, project_id: str):
     project = svc.get_project(company, user, project_id)
     if not project:
         raise HttpError(404, "Project not found.")
-    return {"embedder": project.embedder, "reindex_status": project.reindex_status}
+    return {"embedder": _embedder_out(project.embedder), "reindex_status": project.reindex_status}
 
 
 @router.put("/{project_id}/embedder/", response=dict)
@@ -186,6 +198,15 @@ def set_project_embedder(request, project_id: str, payload: EmbedderIn):
             raise HttpError(400, f"embedder.provider must be one of {', '.join(EMBEDDER_PROVIDERS)}.")
         if not (spec.get("model_id") or "").strip():
             raise HttpError(400, "embedder.model_id is required.")
+        # The key is WRITE-ONLY: an omitted or empty key on a re-save keeps
+        # the stored one (so editing the model id never wipes the key), and
+        # no response ever carries a key back out — _embedder_out masks it.
+        spec = {k: v for k, v in spec.items() if k != "has_api_key"}
+        if not str(spec.get("api_key") or "").strip():
+            spec.pop("api_key", None)
+            stored = (project.embedder or {}).get("api_key") if isinstance(project.embedder, dict) else None
+            if stored:
+                spec["api_key"] = stored
 
     project.embedder = spec
     project.reindex_status = "building"
@@ -193,7 +214,7 @@ def set_project_embedder(request, project_id: str, payload: EmbedderIn):
 
     from intelligence.tasks import reindex_project
     reindex_project.delay(str(project.id))
-    return {"embedder": project.embedder, "reindex_status": "building"}
+    return {"embedder": _embedder_out(project.embedder), "reindex_status": "building"}
 
 
 @router.delete("/{project_id}/")

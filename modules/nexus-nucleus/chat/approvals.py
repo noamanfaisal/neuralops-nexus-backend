@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 
 from asgiref.sync import sync_to_async
@@ -35,6 +36,38 @@ logger = logging.getLogger(__name__)
 APPROVALS_MAX = 20
 APPROVAL_PREVIEW_CHARS = 300
 PLAN_MAX_STEPS = 12
+
+
+# ── WP3: the secure key card's one-time secret hand-off ─────────────────────
+# A secret typed on an approval card (today: the API key of a held setup
+# create_model) must NEVER be stored — not in PausedRun.decisions, not on the
+# message's metadata, nowhere a chat row lands. It is held HERE, in process
+# memory, between the decision POST and the resume that the SAME request
+# schedules in this same process (asyncio.create_task in decide_tool_approval),
+# then consumed exactly once by relay.resume_paused_run. A process restart in
+# that window simply loses it: the resumed create_model runs keyless and the
+# provider check refuses it in words — a safe, honest failure the person
+# retries.
+SECRET_TTL_SECONDS = 300
+SECRET_MAX_CHARS = 4096
+_SECRET_HANDOFF: dict[tuple[str, str], tuple[str, float]] = {}
+
+
+def stash_secret(message_id: str, call_id: str, secret: str) -> None:
+    now = time.time()
+    for key, (_, born) in list(_SECRET_HANDOFF.items()):
+        if now - born > SECRET_TTL_SECONDS:  # a resume that never came
+            _SECRET_HANDOFF.pop(key, None)
+    _SECRET_HANDOFF[(str(message_id), str(call_id))] = (secret, now)
+
+
+def take_secret(message_id: str, call_id: str) -> str | None:
+    """Consumed exactly once — the resume's read deletes it."""
+    row = _SECRET_HANDOFF.pop((str(message_id), str(call_id)), None)
+    if row is None:
+        return None
+    secret, born = row
+    return secret if time.time() - born <= SECRET_TTL_SECONDS else None
 
 
 # ── Preflight plans ───────────────────────────────────────────────────────────
@@ -290,12 +323,15 @@ def _claim_run_decision(message_id: str, call_id: str, decision: dict) -> tuple[
         return run, pending_ids <= set(decisions)
 
 
-async def decide_tool_approval(*, topic, message_id: str, call_id: str, user, decision: str, always: bool = False) -> dict:
+async def decide_tool_approval(*, topic, message_id: str, call_id: str, user, decision: str,
+                               always: bool = False, secret: str | None = None) -> dict:
     """
     Allow or deny a held tool call, under persona.approve_run at the topic.
     `always` also writes "<capability>/<tool>": "auto" onto the persona (needs
     persona.update on the project too). Once decided, a call stays decided.
     When every pending call of the paused run is decided, the run RESUMES.
+    `secret` (WP3): the key typed on the card — allow-only, only for a held
+    setup create_model, handed off in memory and never stored.
     """
     from nucleus.models import ChatMessage, PausedRun, Persona
 
@@ -312,6 +348,17 @@ async def decide_tool_approval(*, topic, message_id: str, call_id: str, user, de
         raise ApprovalError(404, "This message holds no such tool call.")
     if item.get("kind", "approval") != "approval":
         raise ApprovalError(400, "This call is a question — it takes an answer, not an approval.")
+    secret = (secret or "").strip()
+    if secret:
+        # WP3: the card's key field — only an allow of a held setup
+        # create_model takes one; anything else refuses rather than silently
+        # dropping a credential someone typed.
+        if decision != "allow":
+            raise ApprovalError(400, "A key only rides an allow — denying needs no key.")
+        if len(secret) > SECRET_MAX_CHARS:
+            raise ApprovalError(400, "That key is implausibly long.")
+        if item.get("tool") != "create_model" or (item.get("capability_id") or "") != "setup":
+            raise ApprovalError(400, "Only a held model registration takes a key on its card.")
     if call_id in (run.decisions or {}):
         raise ApprovalError(409, "This call has already been decided.")
     if not await sync_to_async(PermissionChecker.can)(user, "persona.approve_run", obj=topic):
@@ -336,6 +383,10 @@ async def decide_tool_approval(*, topic, message_id: str, call_id: str, user, de
     })
     if claim is None:
         raise ApprovalError(409, "This call has already been decided.")
+    if secret:
+        # After the claim (a lost race must not stash), and NEVER in the
+        # claim record itself — the resume consumes it from memory.
+        stash_secret(message_id, call_id, secret)
     run, all_decided = claim
 
     # Mirror onto the message card so history shows the verdict.

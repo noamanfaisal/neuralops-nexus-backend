@@ -1159,6 +1159,8 @@ class ToolApprovalDecisionTests(PausedRunFixture):
             await self.decide(row2, self.owner, "maybe")
         self.assertEqual(ctx.exception.status, 400)
 
+
+class MixedPendingResumeTests(PausedRunFixture):
     async def test_the_run_resumes_only_when_every_pending_call_is_decided(self):
         """An approval AND a question pend together: the first decision parks,
         the answer completes the set and fires ONE resume with both results."""
@@ -1182,6 +1184,63 @@ class ToolApprovalDecisionTests(PausedRunFixture):
         self.assertEqual(resume["answers"]["q1"], "Yes, overwrite it")
         await sync_to_async(row.refresh_from_db)()
         self.assertEqual(row.metadata["questions"][0]["status"], "answered")
+
+
+# WP3 — the secure key card: a held setup create_model's card takes a typed
+# key; it rides the decision → memory → resume road and is stored NOWHERE.
+SETUP_APPROVAL = {"call_id": "k1", "tool": "create_model", "capability_id": "setup",
+                  "args_preview": '{"name": "Groq Llama", "provider": "openai_compatible"}'}
+
+
+class SecretKeyCardTests(PausedRunFixture):
+    """WP3 — allow-only, register-only; handed to the resume in process memory,
+    consumed exactly once, never on the message, the run or any event."""
+
+    async def paused_register(self):
+        return await self.run_paused([{"type": "approval_requested", "id": "m",
+                                       "approval": SETUP_APPROVAL}],
+                                     [dict(SETUP_APPROVAL, kind="approval")])
+
+    async def decide_secret(self, row, user, decision, secret, call_id="k1"):
+        from chat.services import decide_tool_approval
+        return await decide_tool_approval(topic=self.t1, message_id=str(row.id),
+                                          call_id=call_id, user=user,
+                                          decision=decision, secret=secret)
+
+    async def test_the_key_rides_the_resume_and_is_stored_nowhere(self):
+        row = await self.paused_register()
+        FakeClient.responses = [FakeResponse(sse(*DONE_SSE))]
+        outcome = await self.decide_secret(row, self.owner, "allow", "sk-typed-on-card")
+        self.assertEqual(outcome["status"], "allowed")
+        # the card record (and so the published event) never carries it
+        self.assertNotIn("sk-typed-on-card", _json.dumps(outcome))
+        await self.wait_for_status(row.id, "completed")
+        resumed_job = FakeClient.posted[-1]
+        self.assertEqual(resumed_job["resume"]["approvals"]["k1"]["secret"], "sk-typed-on-card")
+        # nowhere on a row: the message's metadata is clean, the parked run is
+        # consumed, and a second take finds nothing (one-time hand-off)
+        meta = await sync_to_async(lambda: ChatMessage.objects.get(id=row.id).metadata)()
+        self.assertNotIn("sk-typed-on-card", _json.dumps(meta))
+        from chat.approvals import take_secret
+        self.assertIsNone(take_secret(str(row.id), "k1"))
+
+    async def test_the_key_is_refused_outside_its_one_road(self):
+        from chat.services import ApprovalError
+        row = await self.paused_register()
+        with self.assertRaises(ApprovalError) as ctx:   # deny takes no key
+            await self.decide_secret(row, self.owner, "deny", "sk-x")
+        self.assertEqual(ctx.exception.status, 400)
+        with self.assertRaises(ApprovalError) as ctx:   # implausibly long
+            await self.decide_secret(row, self.owner, "allow", "x" * 5000)
+        self.assertEqual(ctx.exception.status, 400)
+        # a NON-register held call refuses a typed key outright — a credential
+        # is never silently dropped into a tool that cannot take one
+        row2 = await self.run_paused([{"type": "approval_requested", "id": "m",
+                                       "approval": APPROVAL}], APPROVAL_PENDING)
+        with self.assertRaises(ApprovalError) as ctx:
+            await self.decide_secret(row2, self.owner, "allow", "sk-x", call_id="c1")
+        self.assertEqual(ctx.exception.status, 400)
+        self.assertIn("model registration", str(ctx.exception))
 
 
 # ── W4 Routines ───────────────────────────────────────────────────────────────
