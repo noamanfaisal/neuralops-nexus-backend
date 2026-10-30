@@ -1135,6 +1135,48 @@ lesson 14) and rebuild the image — fold into the next image build.
   setup registration, trimmed key rides Allow, empty = no key, Deny never
   sends one, no field for a reader who cannot decide). WP4 (one-click
   connects) still rides the setup-copilot week.
+  **RULINGS 2026-10-30 evening (owner, in chat — "there should be free model
+  button…", "these buttons should be there when first time user sign in…",
+  "there should be persona which can be only called within configure
+  channel…", 17:11 confirmations). Supersedes nothing; extends WP4 + the
+  setup copilot:**
+  1. **First-sign-in "Start free" screen** — shown to the owner (and any
+     model-manager) whenever the server has ZERO registered models: headline
+     **Connect OpenRouter** (official OAuth PKCE — the only true one-click;
+     consent is the USER'S click, key arrives programmatically, :free models
+     registered automatically), then the free tiles (Groq marked "recommended
+     for agentic setup" — gpt-oss-120b / Kimi K2; Gemini; GitHub Models),
+     **Use local Ollama** (probe + keyless register), and "I have my own
+     key" → the normal dialog. Honesty notes ride every tile. Skippable; the
+     same buttons live on in the models empty state. EXPLICITLY REFUSED
+     (owner asked, Claude ruled it out, owner accepted): signing users up to
+     providers automatically — provider-ToS violation + the no-automated-
+     signups hard rule; the OAuth consent click IS the legitimate version.
+     Owner-side prerequisite: register the NeuralOps app with OpenRouter.
+  2. **Setup copilot persona, channel-locked** — auto-seeded, callable ONLY
+     inside the configure channel (mentions elsewhere politely refuse; new
+     scoping flag), carrying the setup capability (our own app's tools via
+     the internal MCP door) on the user's free model. Its prompt: ask the
+     PROJECT TYPE first, then configure the existing project to match —
+     topics, draft model slots (free presets first, from the catalog),
+     personas, MCP suggestions, invites. It does NOT create projects (owner:
+     "we dont want configure to create project, but it will ask the project
+     type and configure things accordingly"). **invite_user is pulled
+     forward** onto the gateway/setup tool list (card-gated — it sends real
+     email), un-parking it from the team build.
+  3. **DRAFT MODELS ("fake ids, fill later")** — a `draft` state on
+     ModelConfig: no key, no provider check at create, "waiting for key"
+     badge, NOT seatable on any persona until a key arrives and the check
+     passes. Drafts are creatable ONLY through the setup tools (configure
+     copilot / MCP gateway) — the register dialog keeps requiring key +
+     passed check, so the UI can never produce a half-configured model. The
+     key arrives later by the two existing NON-CHAT roads only: the WP3
+     secure card (copilot proposes update_model) or the model Edit dialog.
+     Point of the design (owner): the copilot lays out the whole model
+     lineup in conversation and a raw key never needs to exist in chat.
+  Seeding (Claude's lean, owner did not object): one Setup copilot per
+  PROJECT — every project's configure channel gets one. NOT BUILT YET —
+  owner ruled discussion-only tonight ("dont start program, lets discuss").
 
 - **MCP suggest-attach — RULED (owner, 2026-10-22 17:34: "option 2").** The
   persona may SEE the names + descriptions of the project's other MCP
