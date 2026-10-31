@@ -643,7 +643,15 @@ def get_topic_history_internal(
     """
     from nucleus.models import ChatMessage
 
+    # The Context panel's "Chat History" delete sets is_deleted_from_context
+    # — the person's way of CUTTING a message out of what the AI sees while it
+    # stays visible in the chat. Until 2026-10-30 only retrieval honored the
+    # flag and this endpoint kept serving the message in the last-N history,
+    # so "select all → delete" looked like a context reset but was not one
+    # (found live: the owner tried exactly that to break a persona's
+    # question loop). History honors it now.
     qs = ChatMessage.objects.filter(topic_id=topic_id, is_active=True)
+    qs = qs.exclude(is_deleted_from_context=True)
     if exclude_message_id:
         qs = qs.exclude(id=exclude_message_id)
 

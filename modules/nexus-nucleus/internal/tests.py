@@ -66,6 +66,21 @@ class TopicHistoryInternalTests(MentionRightFixture):
         self.assertEqual(row["content"],
                          '[Asked the person: "Cloud or local?" — Noaman answered: "Cloud"]')
 
+    def test_a_message_deleted_from_context_leaves_the_history_too(self):
+        """The Context panel's Chat History delete (is_deleted_from_context) is
+        the person's context reset — found live 2026-10-30 that only retrieval
+        honored it while this endpoint kept serving the message. Select-all →
+        delete must actually blank what the model sees."""
+        self.reply("please give me the channel ID")
+        kept = self.reply("the good reply")
+        from nucleus.models import ChatMessage
+        ChatMessage.objects.filter(content="please give me the channel ID").update(
+            is_deleted_from_context=True)
+        contents = [r["content"] for r in self.history()]
+        self.assertIn("the good reply", contents)
+        self.assertNotIn("please give me the channel ID", contents)
+        self.assertTrue(kept)
+
     def test_the_wrong_key_is_refused(self):
         with patch.dict(os.environ, {"INTERNAL_API_KEY": "k"}):
             r = Client().get(f"/api/v1/internal/topics/{self.t1.id}/history/", HTTP_X_INTERNAL_API_KEY="nope")
