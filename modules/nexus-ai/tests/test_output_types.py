@@ -162,6 +162,30 @@ def test_ot2_unmarked_chart_recovered_only_when_asked():
     assert kind == "text" and render == "text"
 
 
+def test_ot14_an_unmarked_plan_on_a_plan_first_turn_is_still_a_plan():
+    """Found live 2026-10-31 through the new AI log: DeepSeek answered a
+    plan-first turn with the bare plan JSON, no markers — it was saved as
+    TEXT, so no plan card appeared and "save notes.md" never ran. On a
+    preflight turn the unmarked plan (bare or ```json-fenced) is the plan;
+    on any other turn the same JSON stays text."""
+    plan = json.dumps({"summary": "Save notes.md", "risks": [],
+                       "steps": [{"title": "Write notes.md", "tools": ["filesystem"], "writes": True}]},
+                      indent=2)
+    clean, kind, render, _ = finalise_reply(plan, "preflight")
+    assert (kind, render) == ("preflight", "preflight") and json.loads(clean)["steps"]
+    clean, kind, render, _ = finalise_reply(f"```json\n{plan}\n```", "preflight")
+    assert (kind, render) == ("preflight", "preflight") and json.loads(clean)["summary"] == "Save notes.md"
+    # never on an ordinary turn
+    _, kind, render, _ = finalise_reply(plan, "text")
+    assert (kind, render) == ("text", "text")
+    # a plan with no steps is not a plan — it stays text
+    _, kind, _, _ = finalise_reply(json.dumps({"summary": "x", "steps": []}), "preflight")
+    assert kind == "text"
+    # prose around the JSON means the model was talking — text, as before
+    _, kind, _, _ = finalise_reply(f"Here is my plan:\n{plan}", "preflight")
+    assert kind == "text"
+
+
 def test_ot9_tool_output_is_never_invented():
     """Live finding 2026-10-22 — a persona "ran" date and ls and invented both
     transcripts (wrong date, files that don't exist). Two guards now exist and

@@ -21,14 +21,29 @@ from ai_engine.output_types.registry import OutputTypeRegistry, TYPES_WITHOUT_CH
 # A lone marker — the model opened without closing, or closed without opening.
 _STRAY_MARKERS = re.compile(r"<{2,3}(?:OUTPUT:\w+|END_OUTPUT|EMBED|END_EMBED)>{0,3}")
 
-RECOVERABLE = {"chart": ("type", "datasets"), "choice": ("question", "options")}
+# preflight joined 2026-10-31 (seen live, DeepSeek): a plan-first turn whose
+# model answered with the bare plan JSON and no markers was saved as TEXT —
+# no plan card, nothing to approve, so the work never ran. Only a preflight
+# turn recovers it (the resolved type must be preflight), so an ordinary
+# reply that happens to be JSON with "steps" is never misread as a plan.
+RECOVERABLE = {"chart": ("type", "datasets"), "choice": ("question", "options"),
+               "preflight": ("steps",)}
+
+_FENCE = re.compile(r"^```[A-Za-z0-9_-]*\s*\n(.*)\n```$", re.DOTALL)
 
 # Types whose content must be ONE JSON object to render at all.
 _JSON_TYPES = {"chart", "choice", "preflight"}
 
 
+def _unfence(text: str) -> str:
+    """The body of a reply that is ONE fenced block (```json … ```), else the
+    text unchanged — gpt-oss fences its JSON (seen live 2026-10-30)."""
+    match = _FENCE.match(text.strip())
+    return match.group(1).strip() if match else text
+
+
 def _whole_object(content: str) -> dict | None:
-    text = _STRAY_MARKERS.sub("", content).strip()
+    text = _unfence(_STRAY_MARKERS.sub("", content).strip())
     if not (text.startswith("{") and text.endswith("}")):
         return None
     try:
@@ -42,6 +57,8 @@ def _shaped_as(kind: str, value: dict) -> bool:
     required = RECOVERABLE[kind]
     if kind == "choice":
         return all(key in value for key in required) and isinstance(value["options"], list) and bool(value["options"])
+    if kind == "preflight":
+        return isinstance(value.get("steps"), list) and bool(value["steps"])
     # one description, or a reply of several: {"charts": [description, ...]}
     candidates = value.get("charts") if "charts" in value else [value]
     if not isinstance(candidates, list) or not candidates:
@@ -91,9 +108,11 @@ def finalise_reply(raw: str, resolved_type: str) -> tuple[str, str, str, str | N
         recovered = recover_unmarked(resolved_type, clean)
         if recovered:
             spec = OutputTypeRegistry.get(recovered)
-            clean = strip_stray_markers(clean)
+            clean = _unfence(strip_stray_markers(clean))
     final_type = spec.name if spec else "text"
     render_as = getattr(spec, "render_as", None) or "text"
+    if final_type in _JSON_TYPES:
+        clean = _unfence(clean)  # a fenced object inside the markers renders as the object
     if final_type != "text" and not _holds(final_type, render_as, clean):
         final_type, render_as = "text", "text"
     return clean, final_type, render_as, (None if render_as == "text" else embed_description)

@@ -870,7 +870,22 @@ lesson 14) and rebuild the image — fold into the next image build.
   0.86, so the best retrieval slot carries nothing new. The message is
   indexed before retrieval runs. FIX (later): exclude the triggering
   message id (and anything already in the history sent) from the hits in
-  ai_system._retrieve.
+  ai_system._retrieve. Seen again 2026-10-31 22:33 at score 0.9862 — and
+  the other two hits were messages ALREADY in the history sent, so all three
+  retrieval slots carried nothing new.
+  **FINDINGS from the first full-story export (22:33, plan-first persona):**
+  (a) FIXED same day: DeepSeek answered the plan-first turn with the bare
+  plan JSON and no <<<OUTPUT:preflight>>> markers → saved as text, no plan
+  card, "save notes.md" never ran. recovery.py now recovers an unmarked
+  (or ```json-fenced) plan on a preflight turn only (test ot14).
+  (b) OPEN, for the context work: a plan-first turn's system prompt carries
+  BOTH the preflight contract ("you are proposing … output the plan") AND the
+  router-stage text ("Routing stage … return an Escalate … you have no
+  tools"). Two contracts that contradict; the model picks one. Decide which
+  stage owns a plan-first turn and send only that contract.
+  (c) OPEN, export cosmetics: "Added for routing / hand-over" repeats text
+  that is already inside the instructions block above it — show it as a
+  pointer, not a second copy.
 
 - **AI audit log ("log for all chats").** Project owner/admin can open any AI
   reply and see the whole anatomy: the user's query, what retrieval fetched
