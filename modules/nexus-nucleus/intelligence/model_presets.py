@@ -52,7 +52,10 @@ MODEL_PRESETS = [
         "title": "Groq",
         "provider": "openai_compatible",
         "api_base": "https://api.groq.com/openai/v1",
-        "model_ids": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        # Groq decommissioned the llama-3.x ids in Aug 2026 (found live
+        # 2026-10-30: the provider 404s them); gpt-oss are the production
+        # replacements — and strong tool-callers, right for agentic personas.
+        "model_ids": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
         "key_page": "https://console.groq.com/keys",
         "key_hint": "A free Groq Cloud account; keys are minted on the console's Keys page.",
         "rate_note": "Very fast inference; the free tier has per-minute and per-day request caps.",

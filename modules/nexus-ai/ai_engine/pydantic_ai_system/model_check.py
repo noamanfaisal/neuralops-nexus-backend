@@ -60,8 +60,14 @@ async def check_model(provider: str, model_id: str, api_key: str | None,
         agent = Agent(model=ModelFactory().build(spec))
 
         async def _one_call() -> None:
+            # The budget must leave room for REASONING models (gpt-oss, R1…),
+            # which think in tokens before the first visible word: at 5 the
+            # whole budget went to reasoning, the reply came back empty, and
+            # a perfectly good model failed its check as "misbehaving"
+            # (found live 2026-10-30, Groq openai/gpt-oss-120b). One check
+            # call is still at most ~1k tokens — pennies at worst.
             async with agent.run_stream_events(
-                CHECK_PROMPT, model_settings={"max_tokens": 5},
+                CHECK_PROMPT, model_settings={"max_tokens": 1024},
             ) as run:
                 async for _ in run:
                     pass

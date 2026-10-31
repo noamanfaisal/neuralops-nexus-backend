@@ -1109,6 +1109,17 @@ lesson 14) and rebuild the image — fold into the next image build.
   held); frontend models-tab (tile pre-fill + notes + legal separator id,
   keyless/private Ollama wording). OWNER before release: try each preset
   against the real provider once — endpoints and free tiers move.
+  **GROQ PRESET LIVE-VERIFIED 2026-10-30 (owner, dev stack)** — and the
+  live check earned its keep twice: (1) Groq had DECOMMISSIONED the preset's
+  llama-3.x ids in Aug 2026 (real 404) → the row now ships
+  `openai/gpt-oss-120b` / `openai/gpt-oss-20b`, the production replacements
+  and strong tool-callers; (2) the model CHECK's probe budget (max_tokens 5)
+  starved REASONING models — gpt-oss spent the whole budget thinking,
+  answered empty, and a working model failed its check with the
+  context-length wording → budget raised to 1024 (model_check.py). After
+  both fixes the owner registered Groq gpt-oss-120b live: tile → prefill →
+  key → Check green → saved. The OTHER six presets still await their live
+  try.
   **Part 3 (WP3) — THE SECURE KEY CARD — BUILT 2026-10-30, exactly as the
   hard rules demand.** The inside create_model (setup capability) pauses on
   its approval card like every setup write; the CARD carries a write-only
