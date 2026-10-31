@@ -658,11 +658,38 @@ def get_topic_history_internal(
         sender_name = None
         if m.sender:
             sender_name = metadata.get("persona_name") or m.sender.get_display_name()
+        content = m.content or ""
+        # ANSWERED question cards (ask_user) live in metadata, not in the
+        # message text — so without this, the next run never sees what was
+        # already asked and answered, and a prompt-following model asks the
+        # same question on every mention (found live 2026-10-30: the setup
+        # copilot re-asked its project-type question run after run). The
+        # Q&A is appended to the persona message that carried the card —
+        # served to the engine only; the app keeps rendering the cards from
+        # metadata as before. Pending (unanswered) questions stay out: the
+        # run they belong to is not finished.
+        if sender_type == "persona":
+            answered = [
+                q for q in (metadata.get("questions") or [])
+                if q.get("status") == "answered"
+                and (q.get("question") or "").strip()
+                and (q.get("answer") or "").strip()
+            ]
+            if answered:
+                lines = [
+                    '[Asked the person: "{q}" — {who} answered: "{a}"]'.format(
+                        q=(q.get("question") or "").strip(),
+                        who=q.get("decided_by_name") or "they",
+                        a=(q.get("answer") or "").strip(),
+                    )
+                    for q in answered
+                ]
+                content = (content + "\n\n" if content else "") + "\n".join(lines)
         result.append(HistoryMessageInternal(
             id=str(m.id),
             sender_type=sender_type,
             sender_name=sender_name,
-            content=m.content or "",
+            content=content,
             render_as=metadata.get("render_as", "text"),
             output_type=metadata.get("output_type", "text"),
             stopped=bool(metadata.get("stopped")),

@@ -1203,6 +1203,22 @@ lesson 14) and rebuild the image — fold into the next image build.
   never twice); workspace suite 164 green. VERIFIED LIVE the same evening:
   the owner registered Groq gpt-oss-120b and the row was mounted on his
   test persona in demo-project.
+  **BUG found in that live test (owner 19:08: "model is again and again
+  asking for the what kind of project is this?") — FIXED 2026-10-30 same
+  hour.** ask_user Q&A lived ONLY on the card (message metadata
+  "questions"), never in the message text — so the NEXT run's history
+  (internal /topics/{id}/history/ → HistoryPolicy) carried no trace of what
+  was asked and answered, and a prompt-following model re-asked its triage
+  question on every mention. FIX: get_topic_history_internal now appends
+  every ANSWERED question card to its persona message's served content —
+  '[Asked the person: "…" — <name> answered: "…"]' — engine-facing only
+  (the app keeps rendering cards from metadata); pending questions stay
+  card-only (their run isn't finished); a paused reply whose text is empty
+  now still serves its Q&A, so HistoryPolicy's empty-content drop no longer
+  erases it. Tests: internal TopicHistoryInternalTests +2 (suite 14 OK).
+  The copilot PROMPT also hardened (read the topic before asking; "give me
+  the card" means call the tool) — prompt text lives with the owner until
+  the seeded-copilot build carries it into the catalogue.
 
 - **MCP suggest-attach — RULED (owner, 2026-10-22 17:34: "option 2").** The
   persona may SEE the names + descriptions of the project's other MCP

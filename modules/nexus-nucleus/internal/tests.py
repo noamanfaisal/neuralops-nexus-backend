@@ -34,6 +34,38 @@ class TopicHistoryInternalTests(MentionRightFixture):
             ('{"type": "bar", "ti', True, "text"),
         ])
 
+    def test_answered_question_cards_ride_into_later_runs_history(self):
+        """Found live 2026-10-30: ask_user Q&A lived only on the card, so the
+        NEXT run never saw it and the setup copilot re-asked its project-type
+        question on every mention. Answered cards now ride the served content;
+        pending ones stay off (their run is not finished)."""
+        self.reply("I'll set this up.", questions=[
+            {"call_id": "q1", "kind": "question", "status": "answered",
+             "question": "What kind of project is this?",
+             "answer": "Financial dashboards for Muslimkids.tv",
+             "decided_by_name": "Noaman"},
+            {"call_id": "q2", "kind": "question", "status": "pending",
+             "question": "Which currency?"},
+        ])
+        row = self.history()[-1]
+        self.assertIn("I'll set this up.", row["content"])
+        self.assertIn('[Asked the person: "What kind of project is this?" — Noaman '
+                      'answered: "Financial dashboards for Muslimkids.tv"]', row["content"])
+        self.assertNotIn("Which currency?", row["content"])  # pending stays card-only
+
+    def test_a_paused_reply_with_only_an_answered_card_still_has_content(self):
+        # The reply text can be empty while a run is paused on its question —
+        # the served row then carries just the Q&A, so HistoryPolicy's
+        # empty-content drop no longer erases what was asked and answered.
+        self.reply("", questions=[
+            {"call_id": "q1", "kind": "question", "status": "answered",
+             "question": "Cloud or local?", "answer": "Cloud",
+             "decided_by_name": "Noaman"},
+        ])
+        row = self.history()[-1]
+        self.assertEqual(row["content"],
+                         '[Asked the person: "Cloud or local?" — Noaman answered: "Cloud"]')
+
     def test_the_wrong_key_is_refused(self):
         with patch.dict(os.environ, {"INTERNAL_API_KEY": "k"}):
             r = Client().get(f"/api/v1/internal/topics/{self.t1.id}/history/", HTTP_X_INTERNAL_API_KEY="nope")
