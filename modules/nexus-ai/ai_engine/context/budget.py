@@ -39,7 +39,22 @@ def budget_for(spec: ModelSpec, loop_headroom: int, target_pct: int, trigger_pct
     """The run's budget from the MODEL's window and the PERSONA's output cap —
     two separate numbers, never one field (§4.1: reading max_output_tokens as
     the window is the live 0.8.0 defect this exists to bury)."""
-    input_budget = max(1, spec.context_window - max_output_tokens - loop_headroom)
+    input_budget = spec.context_window - max_output_tokens - loop_headroom
+    floor = max(1, spec.context_window // 2)
+    if input_budget < floor:
+        # A misconfigured card — a reply cap at or over the model's whole
+        # window — must not starve the prompt: at target 1 EVERYTHING (history,
+        # retrieval, tool catalog) gets dropped and the persona forgets the
+        # conversation every run (found live 2026-10-30: a Groq card saved
+        # with window 8192 and reply cap 16000 — the setup copilot re-asked
+        # its questions forever). The reply cap yields: the prompt keeps at
+        # least half the window.
+        log.warning(
+            "budget: reply cap %d + headroom %d leave %d of a %d-token window — "
+            "flooring the input budget at %d (fix the model card's numbers)",
+            max_output_tokens, loop_headroom, input_budget, spec.context_window, floor,
+        )
+        input_budget = floor
     return Budget(
         input_budget=input_budget,
         target=max(1, input_budget * target_pct // 100),

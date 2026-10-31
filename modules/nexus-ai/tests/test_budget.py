@@ -49,6 +49,20 @@ def test_b_budget_formula_keeps_the_two_numbers_apart():
     assert budget.target < budget.trigger < budget.input_budget
 
 
+def test_b_a_reply_cap_over_the_window_cannot_starve_the_prompt():
+    """Found live 2026-10-30 — a card saved with window 8192 and reply cap
+    16000 left an input budget of 1, so EVERYTHING (history, retrieval, tool
+    catalog) was dropped and the persona forgot the conversation every run.
+    The reply cap yields: the prompt keeps at least half the window."""
+    spec = ModelSpec(role=ModelRole.STANDARD, config_id="m", name="m", provider="openai",
+                     model_id="m", base_url=None, api_key=None, context_window=8_192,
+                     supports_tools=True, supports_streaming=True, supports_vision=False)
+    budget = budget_for(spec, loop_headroom=8_000, target_pct=70, trigger_pct=90,
+                        max_output_tokens=16_000)
+    assert budget.input_budget == 8_192 // 2
+    assert budget.target == budget.input_budget * 70 // 100
+
+
 def test_b_fitter_under_target_is_untouched():
     """Item 16 — a plan already under the target passes through byte-identical.
     Selection never rewrites what fits: same sections, same history, same

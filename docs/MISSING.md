@@ -1219,6 +1219,27 @@ lesson 14) and rebuild the image — fold into the next image build.
   The copilot PROMPT also hardened (read the topic before asking; "give me
   the card" means call the tool) — prompt text lives with the owner until
   the seeded-copilot build carries it into the catalogue.
+  **THE DEEPER BUG under the same live test (owner 19:12) — THE STARVING
+  WINDOW, FIXED 2026-10-30.** The owner's Groq card was saved with
+  context_window 8192 (the fallback default — the catalog has no row for
+  openai/gpt-oss-120b) and max_output_tokens 16000 (the ruled 7b default):
+  the reply budget exceeded the whole window, budget_for's input budget
+  clamped to 1, and the fitter dropped EVERYTHING — history, retrieval,
+  tool catalog ("budget: protected content … exceeds target 1") — so the
+  persona was blind every run. Four fixes: (1) the owner's card corrected
+  to 131072; (2) ENGINE floor — budget_for never lets the reply cap starve
+  the prompt below half the window, worded warning (budget.py; test_budget
+  +1, 7 OK); (3) DIALOGS — register/edit refuse a reply cap ≥ the context
+  window, and an UNTOUCHED cap now follows the window prefill (fits to half
+  on small-window models like a local llama3, back to 16000 on big ones) so
+  the colliding defaults can't be saved by accident (models-tab 45 OK, tsc
+  clean); (4) the fallback table learned gpt-oss/kimi-k2 (131072), prefix-
+  tolerant. ALSO SEEN in the same logs, parked: Groq hard-rejects
+  hallucinated tool calls ("attempted to call tool 'json'/'list_models'
+  which was not in request.tools") — killed one reply run and every memory
+  pass on gpt-oss; with real context restored it should subside, but a
+  catch-and-retry (or tool-name scrub) in the engine is the durable fix —
+  queued. Groq free-tier 429s observed mid-run auto-retried and passed.
 
 - **MCP suggest-attach — RULED (owner, 2026-10-22 17:34: "option 2").** The
   persona may SEE the names + descriptions of the project's other MCP
