@@ -29,21 +29,25 @@ _ASK_USER = ToolDefinition(
         "rhetorical questions or things you could decide or look up yourself. "
         "Their answer arrives as this tool's result."
     ),
+    # DELIBERATELY LOOSE: Groq validates tool arguments against this schema
+    # SERVER-SIDE and kills the whole stream on any mismatch — found live
+    # 2026-10-30 three ways in one evening (options: null; options as objects
+    # {label, …}; an invented extra property "multiple"). A strict schema
+    # here turns a model's sloppy-but-understandable call into a dead reply,
+    # so the schema accepts anything option-shaped and the EVENT MAPPER
+    # normalizes it (event_mapper.py: strings stay, dicts take their
+    # label/value/text, extra properties are ignored).
     parameters_json_schema={
         "type": "object",
         "properties": {
             "question": {"type": "string", "description": "One clear question."},
             "options": {
-                # ["array", "null"] on purpose: Groq validates tool arguments
-                # against this schema SERVER-SIDE and kills the whole stream
-                # when a model sends options: null for a free-text question
-                # (found live 2026-10-30, gpt-oss-120b — the run died with
-                # "parameters for tool ask_user did not match schema").
-                "type": ["array", "null"], "items": {"type": "string"},
-                "description": "Two to six concrete options, when the answer is a pick; omit (or null) for a free-text question.",
+                "type": ["array", "null"], "items": {},
+                "description": "Two to six concrete options AS PLAIN STRINGS, when the answer is a pick; omit (or null) for a free-text question.",
             },
         },
         "required": ["question"],
+        "additionalProperties": True,
     },
     kind="external",
 )

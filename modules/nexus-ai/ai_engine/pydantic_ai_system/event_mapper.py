@@ -177,7 +177,18 @@ class EventMapper:
                     ),
                 ))
             # Item 5: an ask_user call is a QUESTION for the person — the card
-            # posts the answer back through the resume.
+            # posts the answer back through the resume. Options arrive in
+            # whatever shape the model felt like (the schema is loose on
+            # purpose — see tools/ask_user.py): a dict option takes its
+            # label/value/text/name, anything else is stringified.
+            def _option_text(o) -> str:
+                if isinstance(o, dict):
+                    for key in ("label", "value", "text", "name", "option"):
+                        v = o.get(key)
+                        if isinstance(v, str) and v.strip():
+                            return v.strip()
+                return str(o)
+
             for call in event.requests.calls:
                 args = _args_dict(call.args)
                 out.append(self._event(
@@ -185,7 +196,7 @@ class EventMapper:
                     question=QuestionData(
                         call_id=call.tool_call_id,
                         question=str(args.get("question", "")),
-                        options=[str(o) for o in (args.get("options") or [])],
+                        options=[_option_text(o) for o in (args.get("options") or [])],
                     ),
                 ))
             return out
