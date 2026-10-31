@@ -512,9 +512,16 @@ class PydanticAISystem:
             return []
         top_k = self._settings.retrieval_top_k
         min_score = self._settings.retrieval_min_score
+        # context_source (attached files/web) AND tool_result (the memory
+        # pass's distilled tool work) search PROJECT-WIDE: tool_result rows
+        # exist precisely so "what did we find earlier?" works in another
+        # topic — yet until 2026-10-30 no query ever included the kind, so
+        # the memory pass wrote rows nothing read (found live: the owner's
+        # cross-topic recall test came back empty). Chat messages below stay
+        # SAME TOPIC ONLY (item 44's rule).
         documents = self._store.search(SearchQuery(
             company_id=job.company_id, project_id=job.project_id, text=job.message,
-            kinds=("context_source",), top_k=top_k, min_score=min_score,
+            kinds=("context_source", "tool_result"), top_k=top_k, min_score=min_score,
         ))
         memory = self._store.search(SearchQuery(
             company_id=job.company_id, project_id=job.project_id, text=job.message,
