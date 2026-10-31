@@ -156,6 +156,23 @@ def test_tv6b_a_failed_rebuild_reports_failed_and_can_be_retried(store):
     assert store.reindex_status("pv6b")["status"] == "active"
 
 
+def test_tv6c_a_forbidden_key_says_permissions_not_refused():
+    """Found live 2026-10-31: OpenAI answered 403 for a VALID key whose
+    permissions excluded embeddings. 401 and 403 now word differently."""
+    import httpx
+
+    from ai_engine.vector_db.reembed import _worded
+
+    def err(code):
+        return httpx.HTTPStatusError(
+            "x", request=httpx.Request("POST", "https://api.openai.com/v1/embeddings"),
+            response=httpx.Response(code))
+
+    assert "refused the API key" in _worded(err(401))
+    forbidden = _worded(err(403))
+    assert "valid but not allowed" in forbidden and "permissions" in forbidden
+
+
 def test_tv6_reembed_builds_flips_and_drops(store):
     """Decisions 4+8 — embedder change: full rebuild, flip only when complete.
     start_reindex registers the building schema (a second start → 409's

@@ -543,6 +543,27 @@ ruling first).
 
 ## 4. Embedder setting + rebuild banner (FRONTEND-REVAMP §2.11) — **BUILT 2026-10-30**
 
+**LIVE TEST 2026-10-31 (owner, T-44f) — three bugs found and FIXED (commit
+509e72a + the 403 wording):** a hosted embedder saved with no key locked the
+project 'building' for 15 h (engine never reported failure; nucleus driver
+killed by the worker's soft limit before its own "mark failed"; save accepted
+a keyless hosted endpoint). Now: engine abandons + reports 'failed' with a
+key-free reason; driver stops on 'failed', limits above its budget, unlocks
+on SoftTimeLimitExceeded; keyless hosted save refused. 401 vs 403 now worded
+differently (403 = valid key without embeddings permission — the owner's
+actual case: a Restricted OpenAI key). ALSO FIXED: the engine test harness
+wiped the LIVE vector DB when run inside the dev container — tests now use
+<db>_test with a hard name guard.
+**FOLLOW-UPS (queued, not built):**
+- The panel shows only "failed"; the engine's worded reason never reaches
+  it (nucleus stores reindex_status only). Carry the reason through (a
+  reindex_error field + the pane's failed note) — small, one migration.
+- SECURITY: vx_indexes.embedder (vector DB registry) stores the full spec
+  INCLUDING the embedder api_key in plaintext JSON — model keys are
+  encrypted at rest everywhere else. Strip the key from the registry row and
+  have the engine receive it per call (or encrypt with the shared field key).
+  Do before release.
+
 Nucleus half built (GET/PUT /projects/{id}/embedder/, reindex_status).
 Verified 2026-10-30: the frontend half did NOT exist — built the same night.
 **BUILT:** an **EmbedderSection** on the project overview pane (under the

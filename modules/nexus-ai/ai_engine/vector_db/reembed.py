@@ -21,9 +21,16 @@ def _worded(exc: Exception) -> str:
     carry a key fragment or a URL with one, so only the status code and the
     exception's class are trusted."""
     status = getattr(getattr(exc, "response", None), "status_code", None)
-    if status in (401, 403):
+    if status == 401:
         return ("The embedding provider refused the API key — re-save the "
                 "embedder with a valid key.")
+    if status == 403:
+        # Found live 2026-10-31: a VALID OpenAI key whose permissions were
+        # "Restricted" (chat allowed, embeddings not) — "refused the key"
+        # sent the owner hunting for a typo that wasn't there.
+        return ("The API key is valid but not allowed to use this embedding "
+                "model — check the key's permissions (OpenAI: allow Embeddings) "
+                "or the provider project's allowed models.")
     if status == 404:
         return "The embedding provider does not know this model id."
     if status == 429:
