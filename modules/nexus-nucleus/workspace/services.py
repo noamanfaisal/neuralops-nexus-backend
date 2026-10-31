@@ -167,15 +167,51 @@ def open_browser_session(project, user, *, width: int = 1280, height: int = 800,
     return {"ticket": ticket, "path": BROWSER_WS_PATH, "expires_in": TERMINAL_TICKET_TTL}
 
 
+# The app's OWN administration tools (models / personas / topics, every write
+# behind an approval card), mountable on a persona like any MCP row. Ruled a
+# NECESSARY part of every project (owner, 2026-10-30: "Neuralops Setup
+# capability setup should be a necessary part of every project"), so
+# provisioning seeds it and migration 0046 backfills existing projects. The
+# name is a reserved namespace: one per project, protected, not deletable.
+SETUP_ROW_NAME = "NeuralOps Setup"
+
+
+def ensure_setup_row(project):
+    """The project's "NeuralOps Setup" internal row, created if missing."""
+    from nucleus.models import MCPServer
+    row, _ = MCPServer.objects.get_or_create(
+        company=project.company, project=project,
+        name=SETUP_ROW_NAME, is_internal=True,
+        defaults=dict(
+            capability_config={"setup": {}},
+            description=(
+                "This app's own administration tools: models, personas and "
+                "topics. Every write pauses on an approval card, and the "
+                "persona acts with the asking person's own rights."
+            ),
+            # Same constraint note as the Capabilities row below: internal
+            # rows must be auth NONE or creation dies on the DB constraint.
+            auth_type=MCPServer.AuthType.NONE,
+            is_protected=True,     # not user-deletable
+        ),
+    )
+    return row
+
+
 def provision_project_folder_and_mcp(project):
     """
-    Create the project's folder on disk and its default tool capabilities.
+    Create the project's folder on disk and its default tool capabilities --
+    the "<Project> Capabilities" row (filesystem/shell/web) AND the
+    "NeuralOps Setup" row (the app's own admin tools).
 
-    Returns the single MCPServer row created. The folder is still needed even
+    Returns the Capabilities MCPServer row (kept: callers read its config);
+    re-running over an existing project never duplicates the Setup row.
+    The folder is still needed even
     though nothing spawns a filesystem server any more -- it is what
     Filesystem.root_dir and Shell.cwd point at, and nexus-ai sees it at the
     same path because both containers bind-mount ./projects to /nexus/projects.
     """
+    ensure_setup_row(project)
     folder_name = get_project_folder_name(project)
     folder_path = os.path.join(settings.PROJECTS_ROOT, folder_name)
     os.makedirs(folder_path, exist_ok=True)

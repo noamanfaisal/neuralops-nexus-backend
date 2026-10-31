@@ -772,6 +772,29 @@ class ProjectBriefTests(InviteGrantsFixture):
 from chat.tests import MentionRightFixture as _MentionRightFixture  # noqa: E402
 
 
+class SetupRowTests(_MentionRightFixture):
+    """Owner's ruling 2026-10-30: the setup capability (the app's own admin
+    tools) is a NECESSARY part of every project — provisioning seeds it,
+    under its reserved name, protected, and never twice."""
+
+    def test_provisioning_seeds_the_setup_row_beside_the_capabilities_row(self):
+        from nucleus.models import MCPServer
+        from workspace.services import SETUP_ROW_NAME, provision_project_folder_and_mcp
+        returned = provision_project_folder_and_mcp(self.p1)
+        self.assertEqual(returned.name, f"{self.p1.name} Capabilities")  # callers still get the config row
+        row = MCPServer.objects.get(project=self.p1, name=SETUP_ROW_NAME)
+        self.assertTrue(row.is_internal)
+        self.assertEqual(list(row.capability_config), ["setup"])
+        self.assertEqual(row.auth_type, MCPServer.AuthType.NONE)
+        self.assertTrue(row.is_protected)  # not user-deletable
+        # The migration's road rides the same get_or_create — running it over
+        # a project that already has the row never makes a second one.
+        from workspace.services import ensure_setup_row
+        again = ensure_setup_row(self.p1)
+        self.assertEqual(again.id, row.id)
+        self.assertEqual(MCPServer.objects.filter(project=self.p1, name=SETUP_ROW_NAME).count(), 1)
+
+
 class TerminalTests(_MentionRightFixture):
     """A shell session in the project folder, for whoever holds project.terminal: the server hands out a signed ticket."""
 

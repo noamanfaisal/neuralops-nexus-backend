@@ -1187,7 +1187,22 @@ lesson 14) and rebuild the image — fold into the next image build.
      lineup in conversation and a raw key never needs to exist in chat.
   Seeding (Claude's lean, owner did not object): one Setup copilot per
   PROJECT — every project's configure channel gets one. NOT BUILT YET —
-  owner ruled discussion-only tonight ("dont start program, lets discuss").
+  owner ruled discussion-only tonight ("dont start program, lets discuss")
+  — EXCEPT the first slice, ruled and built the same evening (owner 18:51:
+  "Neuralops Setup capability setup should be neccsaasy part of every
+  project, may with some namespace"): **SETUP ROW SEEDING BUILT 2026-10-30.**
+  Every project now carries a protected internal MCP row named
+  **"NeuralOps Setup"** (the reserved namespace) with capability_config
+  {"setup": {}} — provisioning seeds it (workspace/services.py
+  ensure_setup_row, called from provision_project_folder_and_mcp) and
+  migration **nucleus.0046_setup_capability_row** backfills existing
+  projects (idempotent by the reserved name; reverse is a no-op so live
+  personas never lose tools). Tick it on a persona and the app's own admin
+  tools mount, approval-carded, caller's-rights. Tests: workspace
+  SetupRowTests (seeded beside the Capabilities row, protected, auth NONE,
+  never twice); workspace suite 164 green. VERIFIED LIVE the same evening:
+  the owner registered Groq gpt-oss-120b and the row was mounted on his
+  test persona in demo-project.
 
 - **MCP suggest-attach — RULED (owner, 2026-10-22 17:34: "option 2").** The
   persona may SEE the names + descriptions of the project's other MCP
