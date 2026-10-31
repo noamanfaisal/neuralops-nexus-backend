@@ -326,6 +326,20 @@ answer is not stored anywhere" under it. Reload: the answer is gone (it is
 never stored). The Usage page gains one chat-reply row for the call. As a
 MEMBER: no audit dialog at all, and the API refuses (403).
 
+**T-44j — Download the AI log (.md) (2026-10-31).** As an ADMIN, open the
+Context pane: the second small icon (page with a down arrow, "Download AI
+log (.md)") saves the whole topic's AI log as one markdown file named
+`<project>-<topic>-ai-log-<date>-<time>.md`. Expect, under every AI reply,
+each model run told in chapters: the question; memory hits with scores and
+excerpts; instruction sections and history; how the prompt was trimmed to
+fit; the final prompt exactly as sent; every model turn, tool call and tool
+result in order; the outcome with tokens/cache/latency; what the memory
+pass kept. No API key anywhere in the file (paste a fake `sk-…` in chat
+first — it must show as `[redacted]`). Replies from before 2026-10-31 say
+plainly which chapters weren't recorded yet. As a MEMBER: no icon, and the
+API answers 403. Also: the "How replies here are built" window now opens
+fully on screen (it used to be half hidden).
+
 **T-44f — FROZEN 2026-10-31: test only this.** The Project pane's "Memory
 embedder" section shows the system default (local FastEmbed) READ-ONLY, with
 no model picker and no Save button, even for the owner. Expect exactly that.
