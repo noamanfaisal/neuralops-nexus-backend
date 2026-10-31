@@ -409,6 +409,10 @@ class ExplainAiErrorTests(SimpleTestCase):
     def test_a_worker_that_vanished_is_said_plainly(self):
         self.assertIn("worker", explain_ai_error("peer closed connection without sending complete message body").lower())
         self.assertIn("worker", explain_ai_error("All connection attempts failed").lower())
+        # The provider itself unreachable (openai sdk wraps it as "Connection
+        # error.") — found live 2026-10-30, a Groq network blip read as the
+        # useless generic sentence.
+        self.assertIn("network hiccup", explain_ai_error("pydantic_ai.exceptions.ModelAPIError: Connection error.").lower())
 
     def test_a_refused_connection_is_a_worker_problem_not_a_content_refusal(self):
         self.assertIn("worker", explain_ai_error("httpx.ConnectError: [Errno 111] Connection refused").lower())

@@ -32,6 +32,10 @@ _CATEGORIES: list[tuple[re.Pattern[str], str]] = [
      "The model provider does not know this model id. Check the model on the AI models page."),
     (re.compile(r"context.?length|maximum context|too many tokens|token limit", re.I),
      "The conversation is longer than this model can take in. Start a new chat or use a larger model."),
+    # The provider itself was unreachable (openai sdk: "Connection error.",
+    # httpcore: "All connection attempts failed") — a network blip, retry.
+    (re.compile(r"apiconnectionerror|connection error", re.I),
+     "The model provider could not be reached — a network hiccup. Mention the persona again to retry."),
     (re.compile(r"peer closed|connection (reset|refused|closed|attempts failed)|remoteprotocolerror|readerror|unreachable|econnrefused|incomplete message body", re.I),
      "The AI worker closed the connection or could not be reached."),
     (re.compile(r"content.?filter|safety|blocked by|\brefusal\b|refused to", re.I),
