@@ -351,6 +351,20 @@ class AdminGatewayToolTests(GatewayFixture):
                                    {"channel_id": str(self.c1.id), "title": "Nope"})
         self.assertTrue(is_error)
 
+        # create_topic by the channel's NAME — a person (or a persona) says
+        # "general", not a UUID (found live 2026-10-30: the setup copilot
+        # asked the owner for "the exact channel ID").
+        is_error, out = self.tool(token_sara, "create_topic",
+                                  {"channel_id": self.c1.name.upper(), "title": "By name"})
+        self.assertFalse(is_error, out)
+        self.assertEqual(out["channel_id"], str(self.c1.id))
+        # A wrong name answers with the channels the person can see.
+        is_error, text = self.tool(token_sara, "create_topic",
+                                   {"channel_id": "no-such-channel", "title": "X"})
+        self.assertTrue(is_error)
+        self.assertIn("The channels you can see", text)
+        self.assertIn(self.c1.name, text)
+
         # get_topic_messages: the transcript, with the AI-only filter.
         seq = (ChatMessage.objects.filter(topic_id=topic_id).aggregate(Max("sequence"))["sequence__max"] or 0)
         ChatMessage.objects.create(company=self.company, project=self.p1, topic_id=topic_id,

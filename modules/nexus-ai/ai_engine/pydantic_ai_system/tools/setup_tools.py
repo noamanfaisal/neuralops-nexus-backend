@@ -209,7 +209,9 @@ def setup_toolset(base_url: str, internal_key: str, user_id: str,
 
     async def create_topic(channel_id: str, title: str) -> str:
         """Add a chat (topic) to a channel — topic.create on that channel, as
-        the acting person."""
+        the acting person. channel_id takes the channel's NAME (e.g.
+        "general") or its id — never ask a person for a channel id; a wrong
+        name is answered with the channels that exist."""
         return await _call("create_topic", {"channel_id": channel_id, "title": title})
 
     async def update_topic(topic_id: str, title: str = "",

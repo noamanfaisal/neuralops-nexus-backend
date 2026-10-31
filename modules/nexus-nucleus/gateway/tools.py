@@ -579,7 +579,13 @@ async def get_topic_messages(user, topic_id: str, ai_only: bool = False,
 
 
 async def create_topic(user, channel_id: str, title: str) -> dict:
-    """Add a chat — topic.create on the channel, exactly the app's road."""
+    """Add a chat — topic.create on the channel, exactly the app's road.
+
+    channel_id takes the channel's id OR ITS NAME (case-insensitive): a person
+    or a persona says "Marketing", not a UUID — found live 2026-10-30, when
+    the setup copilot had to ask the owner for "the exact channel ID" (his
+    verdict: "how the hell do i know"). A miss or an ambiguous name answers
+    with the channels the person can actually see, so the next call lands."""
     def _run():
         from authn.permissions.checker import PermissionChecker
         from nucleus.models import Channel
@@ -588,14 +594,33 @@ async def create_topic(user, channel_id: str, title: str) -> dict:
         company = _company()
         if not (title or "").strip():
             raise GatewayToolError("title is empty.")
+        wanted = (channel_id or "").strip()
+        if not wanted:
+            raise GatewayToolError("Say which channel — its name or its id.")
+
+        def readable(c):
+            return ws_svc.get_project(company, user, str(c.project_id))
+
+        qs = Channel.objects.filter(company=company, is_active=True).select_related("project")
         try:
-            channel = (Channel.objects.filter(id=channel_id, is_active=True)
-                       .select_related("project").first())
-        except Exception:  # noqa: BLE001
+            channel = qs.filter(id=wanted).first()
+        except Exception:  # noqa: BLE001 — not a UUID: try it as a name
             channel = None
-        project = ws_svc.get_project(company, user, str(channel.project_id)) if channel else None
+        project = readable(channel) if channel else None
+        if not channel:
+            named = [c for c in qs if c.name.lower() == wanted.lower() and readable(c)]
+            if len(named) == 1:
+                channel = named[0]
+                project = readable(channel)
+            elif len(named) > 1:
+                listing = ", ".join(f"{c.name} in {c.project.name} (id {c.id})" for c in named)
+                raise GatewayToolError(
+                    f"Several channels are named '{wanted}' — say which by id: {listing}.")
         if not channel or not project:
-            raise GatewayToolError("No such channel.")
+            visible = [c for c in qs if readable(c)][:30]
+            listing = "; ".join(f"{c.name} (project {c.project.name})" for c in visible)
+            raise GatewayToolError(
+                f"No such channel: '{wanted}'. The channels you can see: {listing or 'none'}.")
         if not PermissionChecker.can(user, "topic.create", obj=channel):
             raise GatewayToolError("You don't have permission to create topics in this channel.")
         topic = ws_svc.create_topic(company=company, project=project, channel=channel,
