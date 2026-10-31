@@ -34,8 +34,13 @@ _ASK_USER = ToolDefinition(
         "properties": {
             "question": {"type": "string", "description": "One clear question."},
             "options": {
-                "type": "array", "items": {"type": "string"},
-                "description": "Two to six concrete options, when the answer is a pick.",
+                # ["array", "null"] on purpose: Groq validates tool arguments
+                # against this schema SERVER-SIDE and kills the whole stream
+                # when a model sends options: null for a free-text question
+                # (found live 2026-10-30, gpt-oss-120b — the run died with
+                # "parameters for tool ask_user did not match schema").
+                "type": ["array", "null"], "items": {"type": "string"},
+                "description": "Two to six concrete options, when the answer is a pick; omit (or null) for a free-text question.",
             },
         },
         "required": ["question"],
