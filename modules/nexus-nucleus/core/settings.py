@@ -123,6 +123,11 @@ if _cors_origins:
 else:
     CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+# The web app sits on another origin, and browsers hide every response header
+# that isn't on this list. Downloads (the AI log .md) name their file through
+# Content-Disposition, so it must be readable or the file lands as a generic
+# name (seen live 2026-10-31: "ai-log.md").
+CORS_EXPOSE_HEADERS = ["Content-Disposition"]
 
 ROOT_URLCONF = 'core.urls'
 

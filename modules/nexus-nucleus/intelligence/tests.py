@@ -1144,6 +1144,19 @@ class AuditExportTests(MentionRightFixture):
         tid = topic_id or str(self.t1.id)
         return self.call("get", f"/api/v1/projects/{self.p1.id}/audit/export/?topic_id={tid}", user)
 
+    def test_the_web_app_on_another_origin_can_read_the_file_name(self):
+        """Seen live 2026-10-31: the file landed as "ai-log.md" — the browser
+        hides Content-Disposition from a cross-origin page unless the server
+        exposes it. The name is the project and topic slug."""
+        from django.test import Client
+        from django.utils.text import slugify
+        with patch("authn.auth.verify_supabase_token", return_value={"email": self.owner.email}):
+            r = Client().get(f"/api/v1/projects/{self.p1.id}/audit/export/?topic_id={self.t1.id}",
+                             HTTP_AUTHORIZATION="Bearer t", HTTP_ORIGIN="http://localhost:3000")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn("content-disposition", r["Access-Control-Expose-Headers"].lower())
+        self.assertIn(f'filename="{slugify(self.p1.name)}-{slugify(self.t1.title)}', r["Content-Disposition"])
+
     def story_breakdown(self):
         return {
             "sections": [{"kind": "persona_prompt", "chars": 10, "text": "You are S."}],
