@@ -9,6 +9,8 @@ until the index is active again and then unlocks.
 """
 from unittest.mock import patch
 
+from django.test import override_settings
+
 from chat.tests import MentionRightFixture
 from nucleus.models import Project
 
@@ -18,6 +20,34 @@ SPEC = {"provider": "openai_compatible", "model_id": "text-embedding-3-small", "
 HOSTED = {**SPEC, "api_base": "https://api.openai.com/v1"}
 
 
+class EmbedderFrozenTests(MentionRightFixture):
+    """FROZEN (owner, 2026-10-31): with the switch off (the default), a custom
+    embedder is refused in words and nothing locks; null — back to the
+    system default — still works, the way out for a project left on a
+    custom one."""
+
+    def test_a_custom_embedder_is_refused_and_nothing_changes(self):
+        with patch("intelligence.tasks.reindex_project.delay") as queued:
+            r = self.call("put", f"/api/v1/projects/{self.p1.id}/embedder/", self.owner,
+                          {"embedder": {**HOSTED, "api_key": "sk-x"}})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("paused", r.json()["detail"])
+        queued.assert_not_called()
+        self.p1.refresh_from_db()
+        self.assertEqual((self.p1.embedder, self.p1.reindex_status or ""), (None, ""))
+
+    def test_back_to_the_default_still_works(self):
+        Project.objects.filter(id=self.p1.id).update(embedder=SPEC, reindex_status="failed")
+        with patch("intelligence.tasks.reindex_project.delay") as queued:
+            r = self.call("put", f"/api/v1/projects/{self.p1.id}/embedder/", self.owner,
+                          {"embedder": None})
+        self.assertEqual(r.status_code, 200, r.content)
+        queued.assert_called_once()
+        self.p1.refresh_from_db()
+        self.assertIsNone(self.p1.embedder)
+
+
+@override_settings(EMBEDDER_CHOICE_ENABLED=True)   # the unfrozen behaviour, kept tested
 class EmbedderEndpointTests(MentionRightFixture):
     def put(self, user, body):
         with patch("intelligence.tasks.reindex_project.delay") as queued:

@@ -326,7 +326,13 @@ answer is not stored anywhere" under it. Reload: the answer is gone (it is
 never stored). The Usage page gains one chat-reply row for the call. As a
 MEMBER: no audit dialog at all, and the API refuses (403).
 
-**T-44f — Memory embedder (§2.11).** As the company owner, open a project's
+**T-44f — FROZEN 2026-10-31: test only this.** The Project pane's "Memory
+embedder" section shows the system default (local FastEmbed) READ-ONLY, with
+no model picker and no Save button, even for the owner. Expect exactly that.
+Nothing else in T-44f applies until the owner unfreezes it (docs/MISSING.md
+§4); the original steps are kept below for that day.
+
+(Frozen) **T-44f — Memory embedder (§2.11).** As the company owner, open a project's
 overview pane. Expect a **Memory embedder** section after the spend limit,
 reading "System default — FastEmbed (local)". Pick **OpenAI-compatible
 endpoint**, give a model id (and base/key if you have one), click **Save &

@@ -554,7 +554,19 @@ differently (403 = valid key without embeddings permission — the owner's
 actual case: a Restricted OpenAI key). ALSO FIXED: the engine test harness
 wiped the LIVE vector DB when run inside the dev container — tests now use
 <db>_test with a hard name guard.
-**FOLLOW-UPS (queued, not built):**
+**FROZEN 2026-10-31 (owner: "lets freeze this feature … disable this button
+or keep only default option, add it in the missing").** Every project uses
+the local system default (FastEmbed). Two switches, both OFF by default:
+web `src/lib/features.ts` `features.embedderChoice` (the pane shows the
+default read-only; a project left on a custom embedder gets one button —
+"Back to system default") and server `EMBEDDER_CHOICE_ENABLED` (env; PUT
+/projects/{id}/embedder/ refuses any custom spec in words, accepts null).
+The unfrozen editor + its tests stay in the code (tests run with the
+switches on). **To UNFREEZE, first finish the follow-ups below**, then flip
+both switches and re-run T-44f live with a key that has embeddings
+permission. Tests: nucleus tests_embedder 16 OK (+2 frozen); web pane +2
+frozen tests.
+**FOLLOW-UPS (queued, not built — required before unfreezing):**
 - The panel shows only "failed"; the engine's worded reason never reaches
   it (nucleus stores reindex_status only). Carry the reason through (a
   reindex_error field + the pane's failed note) — small, one migration.

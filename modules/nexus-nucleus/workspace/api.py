@@ -193,6 +193,13 @@ def set_project_embedder(request, project_id: str, payload: EmbedderIn):
         raise HttpError(409, "This project's memory is already rebuilding; wait for it to finish.")
 
     spec = payload.embedder
+    from django.conf import settings as dj_settings
+    if spec is not None and not getattr(dj_settings, "EMBEDDER_CHOICE_ENABLED", False):
+        # FROZEN (owner, 2026-10-31): only the system default for now. null
+        # (back to the default) stays allowed — a project left on a custom
+        # embedder from before the freeze needs that way out.
+        raise HttpError(400, "Choosing a custom embedder is paused for now — every project uses the "
+                             "local system default. Nothing was changed.")
     if spec is not None:
         if not isinstance(spec, dict) or spec.get("provider") not in EMBEDDER_PROVIDERS:
             raise HttpError(400, f"embedder.provider must be one of {', '.join(EMBEDDER_PROVIDERS)}.")

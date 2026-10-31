@@ -212,6 +212,13 @@ SUPABASE_OAUTH_EXCHANGE_URL = os.getenv(
     "SUPABASE_OAUTH_EXCHANGE_URL",
     "https://xgfsxikypxjhqlutiepw.supabase.co/functions/v1/oauth-exchange",
 )
+# FROZEN (owner, 2026-10-31: "lets freeze this feature … keep only default
+# option"): the per-project embedder CHOICE. Off = PUT /projects/{id}/embedder/
+# accepts only null (back to the system default); a custom spec is refused
+# in words. The web app hides the choice behind its own switch
+# (src/lib/features.ts embedderChoice). docs/MISSING.md §4 says what must be
+# hardened before unfreezing.
+EMBEDDER_CHOICE_ENABLED = _env_bool("EMBEDDER_CHOICE_ENABLED", False)
 
 # Step 4 — local (offline) sign-in: a user who set a password in their
 # profile can sign in without Supabase. Tokens are HS256, signed with this
