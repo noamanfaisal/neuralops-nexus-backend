@@ -393,6 +393,33 @@ class StoppableLinesTests(SimpleTestCase):
 from chat.reasons import explain_ai_error, ORPHANED_RUN_REASON
 
 
+class ParsePlanToleranceTests(SimpleTestCase):
+    """Found live 2026-10-30: gpt-oss wrapped its preflight plan in ```json
+    fences, strict json.loads refused it, and the raw plan leaked into the
+    chat as a code block instead of the plan card. The parser now strips
+    fences and finds the outermost object; prose stays a non-plan."""
+
+    PLAN = '{"summary": "List files", "steps": [{"title": "Run ls", "tools": [], "writes": true}], "risks": []}'
+
+    def test_a_fenced_plan_still_parses(self):
+        from chat.approvals import parse_plan
+        fenced = "```json\n" + self.PLAN + "\n```"
+        plan = parse_plan(fenced)
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["steps"][0]["title"], "Run ls")
+
+    def test_a_plan_behind_a_lead_in_sentence_still_parses(self):
+        from chat.approvals import parse_plan
+        plan = parse_plan("Here is my plan:\n" + self.PLAN)
+        self.assertIsNotNone(plan)
+        self.assertTrue(plan["steps"][0]["writes"])
+
+    def test_plain_prose_is_still_not_a_plan(self):
+        from chat.approvals import parse_plan
+        self.assertIsNone(parse_plan("I will run ls and tell you what I find."))
+        self.assertIsNone(parse_plan(""))
+
+
 class ExplainAiErrorTests(SimpleTestCase):
     def test_a_rejected_key_names_the_provider_problem_not_the_key(self):
         raw = "status_code: 401, model_name: gpt-4o-mini, body: {'message': 'Incorrect API key provided: sk-proj-abc...A94A', 'code': 'invalid_api_key'}"

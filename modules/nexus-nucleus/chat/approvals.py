@@ -72,11 +72,42 @@ def take_secret(message_id: str, call_id: str) -> str | None:
 
 # ── Preflight plans ───────────────────────────────────────────────────────────
 
+def _plan_json(content: str):
+    """json.loads with the tolerance real models need: gpt-oss (and friends)
+    wrap the plan in ```json fences or lead with a sentence — found live
+    2026-10-30, the raw plan leaked into the chat as a code block because the
+    strict loads refused the fences. Pure JSON first; then fences stripped;
+    then the outermost {...} substring. Only the PREFLIGHT lane calls this,
+    so the tolerance cannot misread ordinary replies."""
+    text = (content or "").strip()
+    for candidate in (text,):
+        try:
+            return json.loads(candidate)
+        except (TypeError, ValueError):
+            pass
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        try:
+            return json.loads("\n".join(lines).strip())
+        except (TypeError, ValueError):
+            pass
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end:
+        try:
+            return json.loads(text[start:end + 1])
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 def parse_plan(content: str) -> dict | None:
     """The plan a preflight reply carries, or None when the content is not one."""
-    try:
-        raw = json.loads(content)
-    except (TypeError, ValueError):
+    raw = _plan_json(content)
+    if raw is None:
         return None
     if not isinstance(raw, dict) or not isinstance(raw.get("steps"), list):
         return None
