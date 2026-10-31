@@ -25,11 +25,26 @@ CHOICE_EXCEPTION = (
 )
 
 
-def output_instruction_block(system_instruction: str | None) -> str | None:
-    """The section text for the resolved type, 0.8.0's shape kept."""
+# A run nobody is watching (a schedule, a chain step, a review). Found live
+# 2026-10-31: a scheduled "fetch today's gold and dollar rates" answered with
+# a choice card ("which market?") and sat waiting for a person — the run is
+# unattended, so a question can only stall it. The choice exception is
+# withheld and this rule rides instead.
+UNATTENDED_RULE = (
+    "Nobody is watching this reply: it was started by a schedule or an automation, and no one can answer "
+    "a question or approve a step until it is over. Never ask the person anything and never offer them a "
+    "choice. Where a detail is missing, take the most reasonable reading (the project, this conversation "
+    "and earlier work usually show it), say in one line which reading you took, and finish the work."
+)
+
+
+def output_instruction_block(system_instruction: str | None,
+                             allow_choice: bool = True) -> str | None:
+    """The section text for the resolved type, 0.8.0's shape kept. An
+    unattended run (allow_choice=False) never gets the choice exception."""
     if not system_instruction:
         return None
     block = system_instruction
-    if not any(f"<<<OUTPUT:{name}>>>" in system_instruction for name in TYPES_WITHOUT_CHOICE):
+    if allow_choice and not any(f"<<<OUTPUT:{name}>>>" in system_instruction for name in TYPES_WITHOUT_CHOICE):
         block = f"{system_instruction}\n\n{CHOICE_EXCEPTION}"
     return f"--- OUTPUT FORMAT INSTRUCTION ---\n{block}"

@@ -252,6 +252,31 @@ async def test_ot4_explicit_type_reaches_prompt_and_done(harness):
     assert "choice prompt" in sent  # the standing exception rides along
 
 
+async def test_ot15_an_unattended_run_never_asks(harness):
+    """Found live 2026-10-31: a SCHEDULE ("fetch today's gold and dollar
+    rates") answered with a choice card — "which market?" — and waited for
+    a person who wasn't there. An unattended job's prompt carries the
+    never-ask rule and NOT the choice exception; and if a model asks anyway,
+    the question lands as words, never as a card to wait on."""
+    choice = json.dumps({"question": "Which market?", "multiple": False,
+                         "options": [{"id": "in", "label": "India (INR)"},
+                                     {"id": "us", "label": "US (USD)"}]})
+    harness.provider.script.text = f"<<<OUTPUT:choice>>>\n{choice}\n<<<END_OUTPUT>>>"
+    events = await harness.trigger(harness.job(output_type="chart", interactive=False))
+    [done] = _by_type(events, "message_done")
+    assert done["output_type"] == "text" and done["render_as"] == "text"
+    assert "Which market?" in done["content"] and "India (INR)" in done["content"]
+    sent = str(harness.provider.requests[-1])
+    assert "Nobody is watching this reply" in sent
+    assert "choice prompt" not in sent
+    # an unmarked choice is not recovered either when nobody can answer
+    _, kind, _, _ = finalise_reply(choice, "text", allow_choice=False)
+    assert kind == "text"
+    # …and an attended turn is unchanged: the card still works there
+    _, kind, _, _ = finalise_reply(choice, "text")
+    assert kind == "choice"
+
+
 async def test_ot5_plain_text_turn_is_untouched(harness):
     """Item 23 — auto + a plain answer: the Layer 0 stream, byte for byte.
     The classifier resolves an ordinary question to 'text'; the reply's content

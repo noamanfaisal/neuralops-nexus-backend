@@ -66,13 +66,13 @@ def _shaped_as(kind: str, value: dict) -> bool:
     return all(isinstance(c, dict) and all(key in c for key in required) for c in candidates)
 
 
-def recover_unmarked(resolved_type: str, content: str) -> str | None:
+def recover_unmarked(resolved_type: str, content: str, allow_choice: bool = True) -> str | None:
     value = _whole_object(content)
     if value is None:
         return None
     if resolved_type in RECOVERABLE and _shaped_as(resolved_type, value):
         return resolved_type
-    if resolved_type not in TYPES_WITHOUT_CHOICE and _shaped_as("choice", value):
+    if allow_choice and resolved_type not in TYPES_WITHOUT_CHOICE and _shaped_as("choice", value):
         return "choice"
     return None
 
@@ -91,7 +91,8 @@ def _holds(final_type: str, render_as: str, content: str) -> bool:
     return True
 
 
-def finalise_reply(raw: str, resolved_type: str) -> tuple[str, str, str, str | None]:
+def finalise_reply(raw: str, resolved_type: str,
+                   allow_choice: bool = True) -> tuple[str, str, str, str | None]:
     """
     What a finished reply is: (clean content, output type, render_as, embed
     description). Markers name the type; without them the reply is text —
@@ -105,7 +106,7 @@ def finalise_reply(raw: str, resolved_type: str) -> tuple[str, str, str, str | N
     spec = OutputTypeRegistry.get(marker_type)
     # parse_output_markers reports "text" when it found no markers at all.
     if spec is None or spec.name == "text":
-        recovered = recover_unmarked(resolved_type, clean)
+        recovered = recover_unmarked(resolved_type, clean, allow_choice)
         if recovered:
             spec = OutputTypeRegistry.get(recovered)
             clean = _unfence(strip_stray_markers(clean))
@@ -115,4 +116,19 @@ def finalise_reply(raw: str, resolved_type: str) -> tuple[str, str, str, str | N
         clean = _unfence(clean)  # a fenced object inside the markers renders as the object
     if final_type != "text" and not _holds(final_type, render_as, clean):
         final_type, render_as = "text", "text"
+    if final_type == "choice" and not allow_choice:
+        # unattended run that asked anyway: no card to wait on — the question
+        # reads as words, so whoever opens the topic sees what was unclear
+        clean, final_type, render_as = _choice_as_text(clean), "text", "text"
     return clean, final_type, render_as, (None if render_as == "text" else embed_description)
+
+
+def _choice_as_text(content: str) -> str:
+    value = _whole_object(content) or {}
+    question = str(value.get("question") or "").strip() or "a choice"
+    labels = [str(o.get("label") or o.get("id") or "").strip()
+              for o in value.get("options") or [] if isinstance(o, dict)]
+    options = "; ".join(label for label in labels if label)
+    return (f"This run had nobody to ask, so it stopped at a question: {question}"
+            + (f" (options: {options})" if options else "")
+            + ". Add that detail to the schedule's message so the next run has it.")

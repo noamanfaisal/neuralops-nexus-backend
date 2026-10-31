@@ -44,7 +44,7 @@ from ai_engine.core.turn_rules import (
     step_context_section,
 )
 from ai_engine.output_types import finalise_reply, resolve_output_spec
-from ai_engine.output_types.prompting import output_instruction_block
+from ai_engine.output_types.prompting import UNATTENDED_RULE, output_instruction_block
 from ai_engine.output_types.registry import OutputTypeRegistry
 from ai_engine.core.specs import (
     LoadedSet,
@@ -243,11 +243,19 @@ class PydanticAISystem:
                     job.output_type, job.message, bundle.history,
                     persona_default=persona.output_type)
             block = output_instruction_block(
-                resolved_spec.system_instruction if resolved_spec else None)
+                resolved_spec.system_instruction if resolved_spec else None,
+                allow_choice=job.interactive)
             if block:
                 plan = dc_replace(plan, instructions=plan.instructions + (
                     PromptSection(kind="output_format", priority=85, stable=False,
                                   text=block),
+                ))
+            if not job.interactive:
+                # a schedule / chain step: nobody can answer, so never ask
+                # (found live 2026-10-31 — a scheduled run asked "which market?")
+                plan = dc_replace(plan, instructions=plan.instructions + (
+                    PromptSection(kind="unattended", priority=86, stable=False,
+                                  text=UNATTENDED_RULE),
                 ))
 
             # ── Layer 3 (items 24/44/33, decisions 9+10): project memory ────
@@ -461,7 +469,7 @@ class PydanticAISystem:
             # to text (decision 2). The embed description is for item 44.
             raw = self._generator.full_text()
             clean, final_type, final_render, embed_description = finalise_reply(
-                raw, resolved_type)
+                raw, resolved_type, allow_choice=job.interactive)
             if final_type == "text" and clean == raw.strip():
                 # no markers, nothing recovered: the saved content stays BYTE-
                 # IDENTICAL to the streamed deltas (T1's contract) — parsing
