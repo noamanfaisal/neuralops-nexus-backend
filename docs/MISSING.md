@@ -856,7 +856,21 @@ lesson 14) and rebuild the image — fold into the next image build.
   (the owner's context-building phase, post-launch): decision points in
   full (router/deep pick reasons), what-if comparisons. Storage: full detail
   capped per item; 30-day retention for the heavy fields is a follow-up.
-  BUILD STARTED 2026-10-31.
+  **BUILT 2026-10-31** (engine/nucleus fb599a1, web c0d9f93; engine 155
+  passed, nucleus audit+export 12 OK, web context-panel 17/17, tsc + lint
+  clean). Context panel → "Download AI log (.md)" (project.audit only); the
+  magnifier dialog now renders through a portal (no longer half hidden).
+  Live check on an existing topic: older rows render every chapter they
+  carry and say plainly which ones predate the capture. Still to see live:
+  one fresh reply WITH a tool call, read end to end (chapters 3 and 5 only
+  fill for runs after this build).
+  **FINDING from the first real export (for the context-building work):
+  the current message is retrieved as its own top memory hit** — "(earlier
+  in this topic) noamanfaisal: <the very question being asked>" at score
+  0.86, so the best retrieval slot carries nothing new. The message is
+  indexed before retrieval runs. FIX (later): exclude the triggering
+  message id (and anything already in the history sent) from the hits in
+  ai_system._retrieve.
 
 - **AI audit log ("log for all chats").** Project owner/admin can open any AI
   reply and see the whole anatomy: the user's query, what retrieval fetched
