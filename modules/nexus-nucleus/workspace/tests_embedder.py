@@ -12,7 +12,10 @@ from unittest.mock import patch
 from chat.tests import MentionRightFixture
 from nucleus.models import Project
 
-SPEC = {"provider": "openai_compatible", "model_id": "text-embedding-3-small", "api_base": "https://x.example/v1"}
+# A LOCAL OpenAI-compatible endpoint: keyless is legal there. (A hosted one
+# without a key is refused up front — test_a_hosted_endpoint_without_a_key_*.)
+SPEC = {"provider": "openai_compatible", "model_id": "text-embedding-3-small", "api_base": "http://localhost:8080/v1"}
+HOSTED = {**SPEC, "api_base": "https://api.openai.com/v1"}
 
 
 class EmbedderEndpointTests(MentionRightFixture):
@@ -84,6 +87,21 @@ class EmbedderEndpointTests(MentionRightFixture):
         self.assertNotIn("sk-embed-secret", r.content.decode())
         self.assertTrue(r.json()["embedder"]["has_api_key"])
 
+    def test_a_hosted_endpoint_without_a_key_is_refused_and_nothing_locks(self):
+        """Found live 2026-10-30: a hosted OpenAI embedder saved with no key
+        401'd on the first batch and left the project locked 'building'.
+        Refused up front now; the project is untouched and unlocked."""
+        r, queued = self.put(self.owner, {"embedder": HOSTED})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("API key", r.json()["detail"])
+        queued.assert_not_called()
+        self.p1.refresh_from_db()
+        self.assertEqual((self.p1.embedder, self.p1.reindex_status or ""), (None, ""))
+        # with its key it goes through
+        r, queued = self.put(self.owner, {"embedder": {**HOSTED, "api_key": "sk-x"}})
+        self.assertEqual(r.status_code, 200, r.content)
+        queued.assert_called_once()
+
     def test_personas_are_refused_while_the_project_rebuilds(self):
         Project.objects.filter(id=self.p1.id).update(reindex_status="building")
         r, trigger, _ = self.send(self.sara, "@Sara hello")
@@ -126,3 +144,34 @@ class ReindexTaskTests(MentionRightFixture):
         out, _ = self.run_task(statuses=[{"status": "building", "done": 0, "total": 9}] * 3)
         self.assertEqual(out, "failed: timed out")
         self.assertEqual(self.p1.reindex_status, "failed")
+
+    def test_an_engine_failure_unlocks_at_once_without_waiting_out_the_budget(self):
+        """Found live 2026-10-30: the engine's rebuild died on a 401 and the
+        driver kept polling a 'building' that would never move. The engine now
+        reports 'failed' — the driver unlocks on the FIRST such answer."""
+        out, _ = self.run_task(statuses=[
+            {"status": "failed", "error": "The embedding provider refused the API key"},
+            {"status": "active"},  # must never be reached
+        ])
+        self.assertTrue(out.startswith("failed"), out)
+        self.assertIn("refused the API key", out)
+        self.assertEqual(self.p1.reindex_status, "failed")
+
+    def test_a_task_killed_by_its_time_limit_never_leaves_the_project_locked(self):
+        """The old driver was killed mid-sleep by the worker's soft limit and
+        never reached its 'mark failed' line — the project stayed 'building'
+        (persona replies refused) forever."""
+        from celery.exceptions import SoftTimeLimitExceeded
+        from intelligence import tasks
+        Project.objects.filter(id=self.p1.id).update(reindex_status="building")
+        with patch("chat.nexus_ai.NexusAIClient.start_reindex", return_value=(True, "building")), \
+             patch("time.sleep", side_effect=SoftTimeLimitExceeded()):
+            out = tasks.reindex_project(str(self.p1.id))
+        self.p1.refresh_from_db()
+        self.assertEqual(out, "failed: time limit")
+        self.assertEqual(self.p1.reindex_status, "failed")
+
+    def test_the_task_limit_sits_above_its_polling_budget(self):
+        from intelligence import tasks
+        budget = tasks.REINDEX_POLL_SECONDS * tasks.REINDEX_MAX_POLLS
+        self.assertGreater(tasks.reindex_project.soft_time_limit, budget)

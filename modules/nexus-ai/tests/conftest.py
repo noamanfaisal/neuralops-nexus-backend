@@ -85,14 +85,75 @@ def real_model(provider: str, model_id: str | None = None, **kw) -> dict:
     return base
 
 # ── Layer 3: the vector DB tests need a REAL pgvector postgres ─────────────
-# NEXUS_VECTOR_DB_URL points at it (nexus_vectors with CREATE EXTENSION vector).
+# The suite WIPES its vector database at session start (registry + every vx_*
+# schema). It therefore NEVER uses the production variable NEXUS_VECTOR_DB_URL
+# as-is: found 2026-10-31, running the suite inside the dev engine container
+# wiped the LIVE dev project memory (the container's NEXUS_VECTOR_DB_URL is the
+# live nexus_vectors) — and every earlier in-container run had done the same.
+# Resolution order:
+#   1. TEST_VECTOR_DB_URL, when set (any name ending in _test);
+#   2. else the production URL with its database renamed to <name>_test,
+#      created on the same server (with the vector extension) if missing;
+#   3. else the trial-C sandbox below.
+# And a hard guard: a database is wiped ONLY if its name ends in "_test" or
+# it is the trial-C sandbox — anything else makes the vector tests skip.
 # Unreachable → the whole suite still runs, vector tests SKIP with the reason.
 DEFAULT_TEST_PG = "postgresql+psycopg2://trialc@127.0.0.1:54333/nexus_vectors"
 
 
+def _render(url) -> str:
+    # str(URL) MASKS the password in SQLAlchemy 2 — render it for real.
+    return url.render_as_string(hide_password=False)
+
+
+def _test_vector_url() -> str:
+    from sqlalchemy.engine import make_url
+    explicit = os.environ.get("TEST_VECTOR_DB_URL", "").strip()
+    if explicit:
+        return explicit
+    live = os.environ.get("NEXUS_VECTOR_DB_URL", "").strip()
+    if not live:
+        return DEFAULT_TEST_PG
+    url = make_url(live)
+    return _render(url.set(database=f"{url.database}_test"))
+
+
+def _wipe_allowed(url_str: str) -> bool:
+    from sqlalchemy.engine import make_url
+    return url_str == DEFAULT_TEST_PG or (make_url(url_str).database or "").endswith("_test")
+
+
+def _ensure_test_db(url_str: str) -> None:
+    """Create the _test database (and its vector extension) when missing."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+    url = make_url(url_str)
+    admin = create_engine(_render(url.set(database="postgres")),
+                          isolation_level="AUTOCOMMIT", connect_args={"connect_timeout": 3})
+    try:
+        with admin.connect() as conn:
+            exists = conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :n"),
+                                  {"n": url.database}).scalar()
+            if not exists:
+                conn.execute(text(f'CREATE DATABASE "{url.database}"'))
+    finally:
+        admin.dispose()
+    engine = create_engine(url_str, connect_args={"connect_timeout": 3})
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    finally:
+        engine.dispose()
+
+
 def _probe_vector_db(url: str) -> str | None:
+    if not _wipe_allowed(url):
+        return ("refusing to use a non-test vector database (its name must end in "
+                "'_test') — the suite wipes it; set TEST_VECTOR_DB_URL")
     try:
         from sqlalchemy import create_engine, text
+        if url != DEFAULT_TEST_PG:
+            _ensure_test_db(url)
         engine = create_engine(url, connect_args={"connect_timeout": 3})
         with engine.begin() as conn:
             ok = conn.execute(text(
@@ -112,7 +173,7 @@ def _probe_vector_db(url: str) -> str | None:
         return f"{type(exc).__name__}: {exc}"
 
 
-_VECTOR_URL = os.environ.get("NEXUS_VECTOR_DB_URL") or DEFAULT_TEST_PG
+_VECTOR_URL = _test_vector_url()
 _VECTOR_SKIP = _probe_vector_db(_VECTOR_URL)
 
 

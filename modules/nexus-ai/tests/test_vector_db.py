@@ -119,6 +119,43 @@ def test_tv5_fresh_process_reconnects_from_registry(store, vector_url, tmp_path)
         fresh.close()
 
 
+def test_tv6b_a_failed_rebuild_reports_failed_and_can_be_retried(store):
+    """Found live 2026-10-30 — an embedder saved without its key 401'd on the
+    first batch; the walk raised and the leftover BUILDING row reported
+    'building' forever (and refused every retry as busy). ReembedJob now
+    abandons it: status says 'failed' with a key-free reason, the half-built
+    schema is gone, the ACTIVE index still answers, and a fresh start is
+    accepted (and clears the failure)."""
+    from unittest.mock import patch
+
+    import httpx
+
+    from ai_engine.vector_db.reembed import ReembedJob
+
+    # its OWN project: the store fixture is shared, and pv1 is test_tv6's
+    _seed(store, project="pv6b")
+    old_schema = store.active_schema("pv6b")
+    store.start_reindex("cv1", "pv6b", HASH_SMALL)
+    refused = httpx.HTTPStatusError(
+        "401 Unauthorized for sk-should-never-surface",
+        request=httpx.Request("POST", "https://api.openai.com/v1/embeddings"),
+        response=httpx.Response(401))
+    with patch.object(store, "run_reindex", side_effect=refused):
+        ReembedJob(store).run("pv6b")
+    status = store.reindex_status("pv6b")
+    assert status["status"] == "failed"
+    assert "refused the API key" in status["error"]
+    assert "sk-" not in status["error"]               # raw provider text never surfaces
+    assert store.active_schema("pv6b") == old_schema   # the old index untouched
+    assert store.search(SearchQuery(company_id="cv1", project_id="pv6b",
+                                    text="revenue pricing", min_score=0.01))
+    # a retry is accepted (no stale BUILDING row) and clears the failure
+    store.start_reindex("cv1", "pv6b", HASH_SMALL)
+    assert store.reindex_status("pv6b")["status"] == "building"
+    store.run_reindex("pv6b")
+    assert store.reindex_status("pv6b")["status"] == "active"
+
+
 def test_tv6_reembed_builds_flips_and_drops(store):
     """Decisions 4+8 — embedder change: full rebuild, flip only when complete.
     start_reindex registers the building schema (a second start → 409's

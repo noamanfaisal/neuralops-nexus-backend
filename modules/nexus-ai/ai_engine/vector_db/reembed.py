@@ -16,6 +16,23 @@ from ai_engine.vector_db.txtai_store import TxtaiVectorStore
 log = logging.getLogger(__name__)
 
 
+def _worded(exc: Exception) -> str:
+    """A short, key-free reason the owner can act on. Raw provider text can
+    carry a key fragment or a URL with one, so only the status code and the
+    exception's class are trusted."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status in (401, 403):
+        return ("The embedding provider refused the API key — re-save the "
+                "embedder with a valid key.")
+    if status == 404:
+        return "The embedding provider does not know this model id."
+    if status == 429:
+        return "The embedding provider rate-limited the rebuild — try again shortly."
+    if status:
+        return f"The embedding provider answered {status}."
+    return f"The rebuild failed ({type(exc).__name__})."
+
+
 class ReembedJob:
     def __init__(self, store: TxtaiVectorStore) -> None:
         self._store = store
@@ -28,9 +45,10 @@ class ReembedJob:
         """The blocking walk — call from a background thread."""
         try:
             self._store.run_reindex(project_id)
-        except Exception:  # noqa: BLE001 — the status endpoint shows the stall
+        except Exception as exc:  # noqa: BLE001 — reported as 'failed', worded
             log.exception("reindex failed for project %s — old index stays active",
                           project_id)
+            self._store.abandon_reindex(project_id, _worded(exc))
 
     def status(self, project_id: str) -> dict:
         return self._store.reindex_status(project_id)

@@ -207,6 +207,15 @@ def set_project_embedder(request, project_id: str, payload: EmbedderIn):
             stored = (project.embedder or {}).get("api_key") if isinstance(project.embedder, dict) else None
             if stored:
                 spec["api_key"] = stored
+        # A hosted OpenAI-compatible embedder with NO key at all would 401 on
+        # the first batch — refuse it up front instead of locking the project
+        # for a rebuild that cannot succeed (found live 2026-10-30). A local
+        # endpoint (localhost / a private host) may legitimately be keyless.
+        if spec.get("provider") == "openai_compatible" and not spec.get("api_key"):
+            base = str(spec.get("api_base") or "").lower()
+            local = any(h in base for h in ("localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal", "ollama"))
+            if not local:
+                raise HttpError(400, "This embedding endpoint needs an API key — paste it in the key field. Nothing was changed.")
 
     project.embedder = spec
     project.reindex_status = "building"

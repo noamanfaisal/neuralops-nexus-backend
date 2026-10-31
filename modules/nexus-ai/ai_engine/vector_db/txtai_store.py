@@ -73,6 +73,10 @@ class TxtaiVectorStore(VectorStore):
         self._engine = create_engine(url, pool_pre_ping=True)
         self._lock = threading.RLock()          # one process, serialized mutations
         self._open_indexes: dict[str, object] = {}   # schema → txtai Embeddings
+        # project → why its last rebuild failed. In-process on purpose: it
+        # only has to outlive the poll that reports it, and a restart losing
+        # it degrades to "active"/"none" — never to a fake "building".
+        self._failed: dict[str, str] = {}
         with self._engine.begin() as conn:
             conn.execute(text(_REGISTRY_DDL))
 
@@ -316,6 +320,7 @@ class TxtaiVectorStore(VectorStore):
         with self._lock:
             if self._row(project_id, "building") is not None:
                 raise VectorStoreBusy(f"a reindex is already building for {project_id}")
+            self._failed.pop(project_id, None)   # a fresh attempt clears the last failure
             new_row = self._create(company_id, project_id, embedder_spec,
                                    status="building")
             if new_row is None:
@@ -397,11 +402,42 @@ class TxtaiVectorStore(VectorStore):
                     " WHERE project_id = :p AND status = 'building'"
                 ), {"p": project_id})
 
+    def abandon_reindex(self, project_id: str, reason: str) -> None:
+        """A rebuild died: drop the half-built BUILDING index (its row and its
+        schema) and remember why, so the status endpoint reports 'failed'
+        instead of 'building' forever — found live 2026-10-30: an embedder
+        saved without its key 401'd on the first batch, the walk raised, and
+        the leftover BUILDING row made the project look mid-rebuild for good
+        (and refused every retry as "already building"). The ACTIVE index is
+        never touched: searches keep answering from it."""
+        with self._lock:
+            row = self._row(project_id, "building")
+            self._failed[project_id] = (reason or "the rebuild failed")[:300]
+            if row is None:
+                return
+            handle = self._open_indexes.pop(row["schema_name"], None)
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:  # noqa: BLE001
+                    log.exception("closing the abandoned index failed")
+            with self._engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM public.vx_indexes WHERE project_id = :p"
+                    " AND status = 'building'"
+                ), {"p": project_id})
+                conn.execute(text(
+                    f'DROP SCHEMA IF EXISTS "{row["schema_name"]}" CASCADE'))
+
     def reindex_status(self, project_id: str) -> dict:
         building = self._row(project_id, "building")
         if building is not None:
             return {"status": "building", "done": building["done_count"],
                     "total": building["total_count"]}
+        if project_id in self._failed:
+            active = self._row(project_id, "active")
+            return {"status": "failed", "error": self._failed[project_id],
+                    "done": 0, "total": active["total_count"] if active else 0}
         active = self._row(project_id, "active")
         if active is not None:
             return {"status": "active", "done": active["done_count"],

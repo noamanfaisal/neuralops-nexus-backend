@@ -127,7 +127,13 @@ REINDEX_POLL_SECONDS = 5
 REINDEX_MAX_POLLS = 720  # give a big project an hour before calling it failed
 
 
-@shared_task(name="intelligence.tasks.reindex_project")
+# The task's own limits must sit ABOVE its polling budget (720 × 5 s = 1 h):
+# under the worker's global 31-min soft limit the loop was killed mid-sleep and
+# the "mark failed" line after it never ran — the project stayed 'building'
+# (LOCKED: persona replies refused) forever. Found live 2026-10-30.
+@shared_task(name="intelligence.tasks.reindex_project",
+             soft_time_limit=REINDEX_POLL_SECONDS * REINDEX_MAX_POLLS + 120,
+             time_limit=REINDEX_POLL_SECONDS * REINDEX_MAX_POLLS + 180)
 def reindex_project(project_id: str) -> str:
     """
     The embedder changed: drive the engine's rebuild (POST /embed/reindex/,
@@ -155,18 +161,35 @@ def reindex_project(project_id: str) -> str:
         Project.objects.filter(id=project_id).update(reindex_status="failed")
         return f"failed: {detail}"
 
-    for _ in range(REINDEX_MAX_POLLS):
-        time.sleep(REINDEX_POLL_SECONDS)
-        try:
-            status = client.reindex_status(str(project.id))
-        except Exception as exc:  # noqa: BLE001 — a flaky poll is not a failed rebuild
-            logger.info("[reindex] status poll failed for %s: %s", project_id, type(exc).__name__)
-            continue
-        if status.get("status") == "active":
-            Project.objects.filter(id=project_id).update(reindex_status="")
-            logger.info("[reindex] project %s active again (%s/%s)", project_id,
-                        status.get("done"), status.get("total"))
-            return "active"
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    try:
+        for _ in range(REINDEX_MAX_POLLS):
+            time.sleep(REINDEX_POLL_SECONDS)
+            try:
+                status = client.reindex_status(str(project.id))
+            except Exception as exc:  # noqa: BLE001 — a flaky poll is not a failed rebuild
+                logger.info("[reindex] status poll failed for %s: %s", project_id, type(exc).__name__)
+                continue
+            state = status.get("status")
+            if state == "active":
+                Project.objects.filter(id=project_id).update(reindex_status="")
+                logger.info("[reindex] project %s active again (%s/%s)", project_id,
+                            status.get("done"), status.get("total"))
+                return "active"
+            if state == "failed":
+                # The engine abandoned the rebuild (bad key, unknown model…):
+                # the OLD index still answers, so unlock as 'failed' at once.
+                logger.warning("[reindex] project %s failed in the engine: %s",
+                               project_id, status.get("error"))
+                Project.objects.filter(id=project_id).update(reindex_status="failed")
+                return f"failed: {status.get('error') or 'engine reported failure'}"
+    except SoftTimeLimitExceeded:
+        # Never die holding the lock: a killed task leaves the project
+        # unlocked as 'failed' (re-saving the embedder retries).
+        logger.warning("[reindex] project %s hit the task's time limit — marked failed", project_id)
+        Project.objects.filter(id=project_id).update(reindex_status="failed")
+        return "failed: time limit"
 
     logger.warning("[reindex] project %s never came back active — marked failed", project_id)
     Project.objects.filter(id=project_id).update(reindex_status="failed")
