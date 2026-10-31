@@ -90,6 +90,70 @@ async def test_audit_escalation_writes_router_and_deep_rows(harness):
     assert router["msg_id"] == deep["msg_id"] == "msg-1"
 
 
+async def test_audit_tells_the_complete_story_of_a_tool_run(harness, tmp_path):
+    """Owner's ruling 2026-10-31 — the log is a COMPLETE diagnostic story.
+    One history message, a read_file call, then the answer: the record now
+    also carries (1) the TRIMMING story — window, reply cap, target and every
+    ingredient with its token estimate and kept/dropped; (2) the history TEXT
+    as sent; (3) the exact final instructions string; (4) the TOOL LOOP turn
+    by turn — the call with its args, the tool's real result, the model's
+    final text; (5) how many model calls the run made."""
+    (tmp_path / "data.txt").write_text("STORY-FILE-CONTENT-77")
+    harness.nucleus.persona = make_persona(
+        openai_model(harness),
+        capabilities=[{"id": "cap1", "name": "defaults",
+                       "capability_config": {"filesystem": {"root_dir": str(tmp_path)}}}],
+    )
+    harness.nucleus.history = [{
+        "id": "h1", "sender_type": "human", "sender_name": "Noaman",
+        "content": "EARLIER-HISTORY-LINE", "render_as": "text", "output_type": "text",
+        "stopped": False, "sequence": 1, "status": "COMPLETED",
+    }]
+    harness.provider.script.steps = [
+        {"kind": "tool_call", "call_id": "call_s1", "name": "read_file", "args": {"path": "data.txt"}},
+        {"kind": "text", "text": "The file holds STORY-FILE-CONTENT-77."},
+    ]
+    events = await harness.trigger()
+    assert events[-1]["type"] == "message_done"
+
+    post = next(p for p in harness.nucleus.audit_posts if p["role"] == "STANDARD")
+    b = post["breakdown"]
+    # (1) the trimming story
+    trim = b["trim"]
+    assert trim["context_window"] > 0 and trim["reply_cap"] > 0 and trim["target"] > 0
+    whats = [i["what"] for i in trim["items"]]
+    assert "section: persona_prompt" in whats and "the current message" in whats
+    assert any(w.startswith("history #1") for w in whats)
+    assert all("tokens" in i and "kept" in i for i in trim["items"])
+    # (2) history as sent
+    assert [h["text"] for h in b["history"]] == ["EARLIER-HISTORY-LINE"]
+    # (3) the exact final instructions
+    assert "PERSONA-PROMPT-MARKER" in b["final_instructions"]
+    # (4) the tool loop, in order
+    steps = [(t["step"], t.get("tool")) for t in b["transcript"]]
+    assert ("tool_call", "read_file") in steps and ("tool_result", "read_file") in steps
+    assert steps.index(("tool_call", "read_file")) < steps.index(("tool_result", "read_file"))
+    [result] = [t for t in b["transcript"] if t["step"] == "tool_result"]
+    assert "STORY-FILE-CONTENT-77" in result["content"]
+    [call] = [t for t in b["transcript"] if t["step"] == "tool_call"]
+    assert "data.txt" in call["args"]
+    assert b["transcript"][-1]["step"] == "model_text"
+    # (5) the run made two model calls (tool turn + answer)
+    assert b["model_calls"] == 2
+    # (7) the memory step's chapter lands as its OWN entry on the same message
+    # (fire-and-forget after message_done — wait for it, so it can't leak
+    # into the next test's records)
+    import asyncio
+    for _ in range(50):
+        memory = [p for p in harness.nucleus.audit_posts if p["role"] == "memory"]
+        if memory:
+            break
+        await asyncio.sleep(0.1)
+    [memory] = memory
+    assert memory["msg_id"] == "msg-1" and memory["topic_id"] == "t1"
+    assert "memory_pass" in memory["breakdown"]
+
+
 async def test_audit_failed_run_still_lands_with_status_failed(harness):
     """1.3.0 — a run that errors still writes its audit record.
     The persona's only model points at a dead endpoint → the reply ends in
@@ -101,7 +165,7 @@ async def test_audit_failed_run_still_lands_with_status_failed(harness):
     events = await harness.trigger()
     assert events[-1]["type"] == "message_error"
 
-    [post] = harness.nucleus.audit_posts
+    [post] = [p for p in harness.nucleus.audit_posts if p["role"] != "memory"]
     assert post["status"] == "failed"
     assert post["error"]
     assert post["response"] == ""

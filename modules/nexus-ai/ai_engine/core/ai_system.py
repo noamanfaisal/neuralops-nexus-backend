@@ -136,6 +136,10 @@ class PydanticAISystem:
         self._toolsets = toolsets or ToolsetBuilder()
         self._settings = settings or EngineSettings()
         self._store = store  # Layer 3: None = retrieval off
+        # the AI log's retrieval chapter (owner's ruling 2026-10-31): the
+        # query, the thresholds and every hit with an excerpt — not just
+        # label + score. None = retrieval never ran for this reply.
+        self._retrieval_detail: dict | None = None
 
     async def respond(self, job: TriggerJob) -> AsyncIterator[AgentEvent]:
         yield AgentEvent(
@@ -254,10 +258,25 @@ class PydanticAISystem:
             # reply. The refs ride to message_done as retrieved_sources.
             if self._store is not None and job.resume is None:
                 hits: list[SearchHit] = []
+                self._retrieval_detail = {
+                    "query": (job.message or "")[:2000],
+                    "top_k": self._settings.retrieval_top_k,
+                    "min_score": self._settings.retrieval_min_score,
+                    "scopes": "project documents + remembered tool work (project-wide); "
+                              "chat messages (this topic only)",
+                    "hits": [],
+                }
                 try:
                     hits = await asyncio.to_thread(self._retrieve, job)
-                except Exception:  # noqa: BLE001 — memory is a bonus, never a blocker
+                except Exception as exc:  # noqa: BLE001 — memory is a bonus, never a blocker
                     log.exception("retrieval failed for job %s — replying without memory", job.job_id)
+                    self._retrieval_detail["error"] = type(exc).__name__
+                self._retrieval_detail["hits"] = [
+                    {"id": h.id, "kind": h.kind, "label": h.label, "score": round(h.score, 4),
+                     "topic_id": h.topic_id, "used_tools": list(h.used_tools or ()),
+                     "excerpt": (h.text or "")[:1500]}
+                    for h in hits
+                ]
                 if hits:
                     retrieved_refs = [
                         RetrievedRef(id=h.id, kind=h.kind, label=h.label,
@@ -495,14 +514,30 @@ class PydanticAISystem:
 
     async def _memory_task(self, job: TriggerJob, persona: PersonaSpec,
                            outputs: list[dict]) -> None:
+        detail: dict = {}
         try:
             from ai_engine.pydantic_ai_system.memory_pass import run_memory_pass
-            record, saved = await run_memory_pass(job, persona, outputs, self._store)
+            record, saved = await run_memory_pass(job, persona, outputs, self._store, detail=detail)
             if record is not None:
                 await self._nucleus.record_usage([record])
             log.info("[memory] pass saved %d rows for %s", saved, job.msg_id)
-        except Exception:  # noqa: BLE001 — memory is a bonus, never an error
+        except Exception as exc:  # noqa: BLE001 — memory is a bonus, never an error
             log.exception("memory pass failed for %s — the reply is unaffected", job.msg_id)
+            detail["error"] = str(exc)[:500]
+        # the AI log's last chapter: what the pass decided, as its own entry
+        # (role "memory") on the same message — logged, never raised.
+        try:
+            await self._nucleus.record_request_log([{
+                "job_id": job.job_id, "msg_id": job.msg_id, "persona_id": job.persona_id,
+                "model_id": "", "provider": "", "prompt": [], "response": "",
+                "status": "failed" if detail.get("error") else "done",
+                "error": detail.get("error"),
+                "topic_id": job.topic_id, "project_id": job.project_id,
+                "role": "memory", "model_name": detail.get("model", ""),
+                "breakdown": {"memory_pass": detail},
+            }])
+        except Exception:  # noqa: BLE001
+            log.exception("memory-pass audit write failed for %s", job.msg_id)
 
     def _retrieve(self, job: TriggerJob) -> list[SearchHit]:
         """Two scoped searches (design §3): documents project-wide; chat memory
@@ -589,6 +624,14 @@ class PydanticAISystem:
                 "resume": a.get("resume", False),
                 "fallback_attempt": a.get("fallback_attempt", 0),
                 "started_at": a.get("started_at", ""),
+                # ── the complete story (owner's ruling 2026-10-31) ──
+                "retrieval_detail": self._retrieval_detail,
+                "trim": a.get("trim"),
+                "history": a.get("history", []),
+                "final_instructions": a.get("final_instructions", ""),
+                "transcript": a.get("transcript", []),
+                "cache_read_tokens": a.get("cache_read_tokens", 0),
+                "model_calls": a.get("model_calls", 0),
             },
         } for a in audits]
         try:

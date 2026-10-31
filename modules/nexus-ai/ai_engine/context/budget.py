@@ -74,34 +74,77 @@ class BudgetFitter:
         self._estimate = estimate
 
     def fit(self, plan: PromptPlan, budget: Budget) -> PromptPlan:
+        return self.fit_report(plan, budget)[0]
+
+    def fit_report(self, plan: PromptPlan, budget: Budget) -> tuple[PromptPlan, dict]:
+        """fit() plus THE TRIMMING STORY for the AI log (owner's ruling
+        2026-10-31: the log must show "how its compact"): every ingredient
+        with its token estimate and whether it was kept, the reason for each
+        drop, and the totals before/after against the target. Until now the
+        drops went only to the server log — which is how the 8192-window
+        starvation (2026-10-30) stayed invisible."""
         est = self._estimate
-        fixed = sum(est(s.text) for s in plan.instructions) + est(plan.message)
+        section_costs = [est(s.text) for s in plan.instructions]
+        message_cost = est(plan.message)
         history_costs = [est(m.text) for m in plan.history]
-        total = fixed + sum(history_costs)
-        if total <= budget.target:
-            return plan
+        before = sum(section_costs) + message_cost + sum(history_costs)
+        total = before
+        dropped_history = 0
+        dropped_sections: set[int] = set()   # indexes into plan.instructions
+        protected_over = False
 
-        # 1) drop old history, oldest first
-        history = list(plan.history)
-        costs = list(history_costs)
-        while history and total > budget.target:
-            total -= costs.pop(0)
-            dropped = history.pop(0)
-            log.info("budget: dropped history message (%d chars) — over target", len(dropped.text))
-        if total <= budget.target:
-            return replace(plan, history=tuple(history))
-
-        # 2) drop droppable sections (below the persona prompt's priority)
-        sections = list(plan.instructions)
-        for section in sorted((s for s in sections if s.priority < 90), key=lambda s: s.priority):
-            sections.remove(section)
-            total -= est(section.text)
-            log.info("budget: dropped section %r — over target", section.kind)
-            if total <= budget.target:
-                break
         if total > budget.target:
-            # protected content alone exceeds the target: §4.1's escape valve
-            # (indexing, items 33/34) is the real answer — never truncate it here.
-            log.warning("budget: protected content (%d tokens) exceeds target %d — sent anyway",
-                        total, budget.target)
-        return replace(plan, history=tuple(history), instructions=tuple(sections))
+            # 1) drop old history, oldest first
+            while dropped_history < len(plan.history) and total > budget.target:
+                total -= history_costs[dropped_history]
+                log.info("budget: dropped history message (%d chars) — over target",
+                         len(plan.history[dropped_history].text))
+                dropped_history += 1
+            # 2) drop droppable sections (below the persona prompt's priority)
+            if total > budget.target:
+                order = sorted((i for i, s in enumerate(plan.instructions) if s.priority < 90),
+                               key=lambda i: plan.instructions[i].priority)
+                for i in order:
+                    dropped_sections.add(i)
+                    total -= section_costs[i]
+                    log.info("budget: dropped section %r — over target", plan.instructions[i].kind)
+                    if total <= budget.target:
+                        break
+            if total > budget.target:
+                # protected content alone exceeds the target: §4.1's escape valve
+                # (indexing, items 33/34) is the real answer — never truncate it here.
+                protected_over = True
+                log.warning("budget: protected content (%d tokens) exceeds target %d — sent anyway",
+                            total, budget.target)
+
+        # a plan that fits passes through as the SAME object (the cache
+        # prefix is not disturbed for nothing — test_budget pins it)
+        fitted = plan if not (dropped_history or dropped_sections) else replace(
+            plan,
+            history=plan.history[dropped_history:],
+            instructions=tuple(s for i, s in enumerate(plan.instructions) if i not in dropped_sections),
+        )
+        items = [
+            {"what": f"section: {s.kind}", "priority": s.priority, "tokens": section_costs[i],
+             "kept": i not in dropped_sections,
+             **({"reason": "over target — lowest-priority sections go after all old history"}
+                if i in dropped_sections else {})}
+            for i, s in enumerate(plan.instructions)
+        ] + [
+            {"what": f"history #{n + 1} ({m.role}{', ' + m.author if m.author else ''})",
+             "tokens": history_costs[n], "kept": n >= dropped_history,
+             **({"reason": "over target — oldest history goes first"} if n < dropped_history else {})}
+            for n, m in enumerate(plan.history)
+        ] + [{"what": "the current message", "tokens": message_cost, "kept": True,
+              "reason": "never dropped"}]
+        report = {
+            "input_budget": budget.input_budget,
+            "target": budget.target,
+            "trigger": budget.trigger,
+            "tokens_before": before,
+            "tokens_after": total,
+            "trimmed": before > budget.target,
+            "protected_over_target": protected_over,
+            "items": items,
+        }
+        return fitted, report

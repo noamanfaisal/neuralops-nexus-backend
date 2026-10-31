@@ -1125,6 +1125,113 @@ class AuditLogTests(MentionRightFixture):
         self.assertEqual(len(r.json()), 1)
 
 
+class AuditExportTests(MentionRightFixture):
+    """Owner's ruling 2026-10-31 — the topic's AI log as ONE downloadable
+    markdown story: every reply's question, ingredients (memory search with
+    scores, history), trimming, exact final prompt, tool loop, outcome and
+    memory pass. Admin-tier like every audit route; credentials masked."""
+
+    write_log = AuditLogTests.write_log
+    FAKE_KEY = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX123"
+
+    def say(self, sender, content, seq, **meta):
+        from nucleus.models import ChatMessage
+        return ChatMessage.objects.create(
+            company=self.company, project=self.p1, topic=self.t1, sender=sender,
+            content=content, sequence=seq, metadata=meta)
+
+    def export(self, user, topic_id=None):
+        tid = topic_id or str(self.t1.id)
+        return self.call("get", f"/api/v1/projects/{self.p1.id}/audit/export/?topic_id={tid}", user)
+
+    def story_breakdown(self):
+        return {
+            "sections": [{"kind": "persona_prompt", "chars": 10, "text": "You are S."}],
+            "message": "what files do we have?", "history_count": 1,
+            "retrieval": [{"label": "budget.md", "score": 0.82, "kind": "tool_result"}],
+            "extra_instructions": "", "resume": False, "fallback_attempt": 0,
+            "retrieval_detail": {
+                "query": "what files do we have?", "top_k": 5, "min_score": 0.3,
+                "scopes": "project-wide + this topic",
+                "hits": [{"id": "m:tr0", "kind": "tool_result", "label": "read_file budget.md",
+                          "score": 0.82, "excerpt": "max $500/day ads"}]},
+            "trim": {"model": "Groq", "context_window": 131072, "reply_cap": 16000,
+                     "loop_headroom": 8000, "target_pct": 70, "input_budget": 107072,
+                     "target": 74950, "trigger": 96364, "tokens_before": 900, "tokens_after": 700,
+                     "trimmed": True, "protected_over_target": False,
+                     "items": [{"what": "section: persona_prompt", "tokens": 400, "kept": True},
+                               {"what": "history #1 (user, Noaman)", "tokens": 200, "kept": False,
+                                "reason": "over target — oldest history goes first"}]},
+            "history": [{"role": "user", "author": "Noaman", "text": "EARLIER-LINE"}],
+            "final_instructions": "You are S. FINAL-INSTRUCTIONS-MARKER",
+            "transcript": [
+                {"step": "tool_call", "tool": "read_file", "args": '{"path": "budget.md"}'},
+                {"step": "tool_result", "tool": "read_file",
+                 "content": f"rules\nOPENAI_KEY={self.FAKE_KEY}"},
+                {"step": "model_text", "content": "Here are the rules."}],
+            "cache_read_tokens": 120, "model_calls": 2,
+        }
+
+    def test_the_owner_downloads_the_whole_story(self):
+        self.say(self.sara, "what files do we have?", 1)
+        reply = self.say(self.persona_sara.identity_user, "Here are the rules.", 2,
+                         persona_id=str(self.persona_sara.id), persona_name="Sara")
+        self.write_log(msg_id=str(reply.id), breakdown=self.story_breakdown())
+        self.write_log(msg_id=str(reply.id), role="memory", model_id="", provider="", response="",
+                       breakdown={"memory_pass": {"model": "Groq", "rulings": [
+                           {"index": 0, "tool": "read_file", "action": "summary", "summary": "3 budget rules"}],
+                           "saved": [{"id": "x:tr0", "label": "read_file budget.md", "text": "3 budget rules"}]}})
+        r = self.export(self.owner)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn("text/markdown", r["Content-Type"])
+        self.assertIn("attachment;", r["Content-Disposition"])
+        self.assertIn("-ai-log-", r["Content-Disposition"])
+        body = r.content.decode()
+        # the conversation itself
+        self.assertIn("what files do we have?", body)
+        self.assertIn("Here are the rules.", body)
+        # every chapter of the story
+        for chapter in ("1. The question", "2. Ingredients gathered", "3. Trimming",
+                        "4. The final prompt", "5. The run, turn by turn", "6. Outcome",
+                        "7. After the reply — the memory pass"):
+            self.assertIn(chapter, body)
+        self.assertIn("max $500/day ads", body)                  # memory hit excerpt
+        self.assertIn("0.82", body)                              # its score
+        self.assertIn("**DROPPED**", body)                       # the trimming verdict
+        self.assertIn("FINAL-INSTRUCTIONS-MARKER", body)         # the exact prompt
+        self.assertIn("EARLIER-LINE", body)                      # history as sent
+        self.assertIn("Model called `read_file`", body)          # the tool loop
+        self.assertIn("Saved to project memory: 1 row(s)", body)
+
+    def test_credentials_never_leave_in_the_file(self):
+        reply = self.say(self.persona_sara.identity_user, f"oops {self.FAKE_KEY}", 1,
+                         persona_id=str(self.persona_sara.id), persona_name="Sara")
+        self.write_log(msg_id=str(reply.id), breakdown=self.story_breakdown(),
+                       response=f"Bearer abcdefghijklmnopqrstuvwxyz0123 and {self.FAKE_KEY}")
+        body = self.export(self.owner).content.decode()
+        self.assertNotIn(self.FAKE_KEY, body)
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz0123", body)
+        self.assertIn("[redacted]", body)
+
+    def test_a_row_from_before_the_story_capture_still_renders(self):
+        reply = self.say(self.persona_sara.identity_user, "old reply", 1,
+                         persona_id=str(self.persona_sara.id), persona_name="Sara")
+        self.write_log(msg_id=str(reply.id))   # the 1.3.0 shape: sections + counts only
+        r = self.export(self.owner)
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.content.decode()
+        self.assertIn("You are S.", body)               # the section text still shown
+        self.assertIn("Not recorded for this run", body)
+
+    def test_members_are_refused_and_foreign_topics_are_not_found(self):
+        self.assertEqual(self.export(self.sara).status_code, 403)
+        self.assertEqual(self.export(self.owner, topic_id="not-a-uuid").status_code, 404)
+        from nucleus.models import ChatTopic
+        other = ChatTopic.objects.exclude(project=self.p1).first()
+        if other is not None:
+            self.assertEqual(self.export(self.owner, topic_id=str(other.id)).status_code, 404)
+
+
 class InvestigateAuditTests(MentionRightFixture):
     """1.3.0's deferred half — "investigate with a model": ask a model about
     the log from inside it. Same right as reading; the model must be attached

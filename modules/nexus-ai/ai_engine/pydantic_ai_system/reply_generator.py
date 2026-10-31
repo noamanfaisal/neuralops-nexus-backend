@@ -76,6 +76,73 @@ log = logging.getLogger(__name__)
 # retrieval dump can't bloat the nucleus row.
 AUDIT_TEXT_CAP = 20_000
 AUDIT_ERROR_CAP = 500
+# The complete-story additions (owner's ruling 2026-10-31): the exact final
+# instructions string, each history message as sent, and every turn of the
+# tool loop — capped per item so one giant tool result can't bloat the row.
+AUDIT_INSTRUCTIONS_CAP = 60_000
+AUDIT_HISTORY_CAP = 4_000
+AUDIT_TURN_CAP = 8_000
+AUDIT_MAX_TURNS = 200
+
+
+def _clip(text: str, cap: int) -> str:
+    text = text or ""
+    return text if len(text) <= cap else text[:cap] + f"… [+{len(text) - cap} chars]"
+
+
+def _as_text(value) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        import json
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001
+        return str(value)
+
+
+def _transcript(messages) -> list[dict]:
+    """The run's tool loop turn by turn, for the AI log: what the model said
+    or asked for, each tool call with its args, each tool's result, retries.
+    Read off pydantic-ai's own message list by part_kind — no framework
+    imports needed, and an unknown part kind is skipped, never fatal."""
+    turns: list[dict] = []
+    for message in messages or []:
+        kind = getattr(message, "kind", "")
+        for part in getattr(message, "parts", []) or []:
+            pk = getattr(part, "part_kind", "")
+            if kind == "response" and pk == "text":
+                turns.append({"step": "model_text", "content": _clip(part.content, AUDIT_TURN_CAP)})
+            elif kind == "response" and pk == "thinking":
+                turns.append({"step": "model_thinking", "content": _clip(part.content, AUDIT_TURN_CAP)})
+            elif kind == "response" and pk == "tool-call":
+                turns.append({"step": "tool_call", "tool": part.tool_name,
+                              "call_id": part.tool_call_id,
+                              "args": _clip(_as_text(part.args), AUDIT_TURN_CAP)})
+            elif kind == "request" and pk == "tool-return":
+                turns.append({"step": "tool_result", "tool": part.tool_name,
+                              "call_id": part.tool_call_id,
+                              "content": _clip(_as_text(part.content), AUDIT_TURN_CAP)})
+            elif kind == "request" and pk == "retry-prompt":
+                turns.append({"step": "retry", "tool": getattr(part, "tool_name", None),
+                              "content": _clip(_as_text(part.content), AUDIT_TURN_CAP)})
+            elif kind == "request" and pk == "user-prompt":
+                turns.append({"step": "user", "content": _clip(_as_text(part.content), AUDIT_TURN_CAP)})
+            if len(turns) >= AUDIT_MAX_TURNS:
+                turns.append({"step": "truncated", "content": f"more than {AUDIT_MAX_TURNS} turns"})
+                return turns
+    return turns
+
+
+def _transcript_from_outputs(outputs: list[dict]) -> list[dict]:
+    """A failed run has no result to read — the mapper's tool outputs are the
+    best record of what ran before it died."""
+    turns: list[dict] = []
+    for out in outputs[:AUDIT_MAX_TURNS]:
+        turns.append({"step": "tool_call", "tool": out.get("tool"),
+                      "args": _clip(_as_text(out.get("args") or {}), AUDIT_TURN_CAP)})
+        turns.append({"step": "tool_result", "tool": out.get("tool"),
+                      "content": _clip(_as_text(out.get("content") or ""), AUDIT_TURN_CAP)})
+    return turns
 
 
 class ReplyGenerator:
@@ -128,13 +195,18 @@ class ReplyGenerator:
         # item 16: SELECTION — trim the plan to the primary model's budget
         # before anything is sent (a resume continues a stored state untouched)
         plan = request.plan
+        trim: dict | None = None   # the AI log's trimming story
         if self._fitter is not None and self._settings is not None and resume is None:
             # 7b (2026-10-20): the PRIMARY CANDIDATE's own output cap — per
             # model, no longer one persona-wide number.
             budget = budget_for(primary, self._settings.budget_loop_headroom,
                                 self._settings.budget_target_pct, self._settings.budget_trigger_pct,
                                 primary.max_output_tokens)
-            plan = self._fitter.fit(plan, budget)
+            plan, trim = self._fitter.fit_report(plan, budget)
+            trim = {"model": primary.name, "context_window": primary.context_window,
+                    "reply_cap": primary.max_output_tokens,
+                    "loop_headroom": self._settings.budget_loop_headroom,
+                    "target_pct": self._settings.budget_target_pct, **trim}
 
         instructions = self._converter.instructions(plan)
         # 1.3.0 audit: anything appended BEYOND the plan's sections is recorded
@@ -189,6 +261,16 @@ class ReplyGenerator:
                 "history_count": len(history),
                 "message": (prompt or "")[:AUDIT_TEXT_CAP],
                 "started_at": datetime.now(timezone.utc).isoformat(),
+                # ── the complete story (owner's ruling 2026-10-31) ──
+                "trim": trim,
+                # the history AS SENT (post-trim); a resume continues a stored
+                # run state instead — its turns appear in the transcript
+                "history": ([] if resume is not None else [
+                    {"role": m.role, "author": m.author, "text": _clip(m.text, AUDIT_HISTORY_CAP)}
+                    for m in plan.history
+                ]),
+                # the exact instructions string the model received
+                "final_instructions": _clip(instructions, AUDIT_INSTRUCTIONS_CAP),
             }
             agent = self._agents.build(persona, request.role, instructions,
                                        escalate=allow_escalation, spec=candidate)
@@ -242,7 +324,8 @@ class ReplyGenerator:
                 self._audits.append({**audit, "status": "failed", "error": str(exc)[:AUDIT_ERROR_CAP],
                                      "response": mapper.text()[:AUDIT_TEXT_CAP],
                                      "prompt_tokens": rec.input_tokens, "completion_tokens": rec.output_tokens,
-                                     "latency_ms": int((time.monotonic() - started) * 1000)})
+                                     "latency_ms": int((time.monotonic() - started) * 1000),
+                                     "transcript": _transcript_from_outputs(mapper.tool_outputs)})
                 # item 12: retry on the next candidate ONLY while the reader has
                 # seen nothing — never switch voices mid-reply.
                 if mapper.text() == "" and index < len(candidates) - 1:
@@ -274,6 +357,13 @@ class ReplyGenerator:
             run_records = self._records[self._last_run_start:]
             self._audits[-1]["prompt_tokens"] = sum(r.input_tokens for r in run_records)
             self._audits[-1]["completion_tokens"] = sum(r.output_tokens for r in run_records)
+            self._audits[-1]["cache_read_tokens"] = sum(r.cache_read_tokens for r in run_records)
+            self._audits[-1]["model_calls"] = len(run_records)
+            # the tool loop, turn by turn (THIS run's messages only — the
+            # history it started from is recorded separately above)
+            self._audits[-1]["transcript"] = (
+                _transcript(result.new_messages()) if result is not None
+                else _transcript_from_outputs(mapper.tool_outputs if mapper else []))
 
         # Items 13/46: a run that produced an Escalate hands the reply over.
         output = result.output if result else None

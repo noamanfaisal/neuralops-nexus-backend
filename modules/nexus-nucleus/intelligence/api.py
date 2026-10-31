@@ -855,6 +855,36 @@ def investigate_audit_route(request, project_id: str, payload: AuditInvestigateI
     return investigate_audit(request, project_id, payload)
 
 
+@router.get("/projects/{project_id}/audit/export/")
+def export_audit_topic(request, project_id: str, topic_id: str):
+    """The whole topic's AI log as ONE markdown story (owner's ruling
+    2026-10-31) — a download. Same gate as every audit route (project.audit,
+    Admin-tier: the file carries everyone's prompts), the topic must belong
+    to this project, credentials are masked (audit_export.redact), and the
+    download itself is logged — who took a copy of which topic, when.
+    Registered BEFORE the {log_id} route, whose regex also matches /export/."""
+    from django.http import HttpResponse
+
+    from nucleus.models import ChatTopic
+
+    from .audit_export import build_topic_story
+
+    _company_, project = _audit_project(request, project_id)
+    try:
+        topic = (ChatTopic.objects.filter(id=topic_id, project=project)
+                 .select_related("channel").first())
+    except Exception:  # noqa: BLE001 — not a UUID
+        topic = None
+    if not topic:
+        raise HttpError(404, "Topic not found in this project.")
+    filename, body = build_topic_story(project, topic, user=request.auth)
+    logger.info("[audit] AI log exported: project=%s topic=%s by=%s (%d bytes)",
+                project.id, topic.id, getattr(request.auth, "email", request.auth), len(body))
+    response = HttpResponse(body, content_type="text/markdown; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 @router.get("/projects/{project_id}/audit/{log_id}/", response=AuditEntryDetailOut)
 def get_audit_entry(request, project_id: str, log_id: str):
     """One run in full: the prompt anatomy (breakdown) + the raw response."""

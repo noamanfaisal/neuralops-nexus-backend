@@ -127,9 +127,13 @@ def _items(job: TriggerJob, outputs: list[dict], rulings: MemoryRulings) -> list
 
 
 async def run_memory_pass(job: TriggerJob, persona: PersonaSpec,
-                          outputs: list[dict], store) -> tuple[UsageRecord | None, int]:
+                          outputs: list[dict], store,
+                          detail: dict | None = None) -> tuple[UsageRecord | None, int]:
     """One structured-output call + the index writes. Returns (usage record,
-    rows saved); raises nothing — the caller logs."""
+    rows saved); raises nothing — the caller logs. `detail`, when given, is
+    filled with what the pass decided, for the AI log's last chapter (owner's
+    ruling 2026-10-31): each ruling (tool, action, summary) and every row
+    saved (label + text)."""
     import asyncio
 
     # The project's index is created by nucleus's embed calls with the
@@ -137,6 +141,8 @@ async def run_memory_pass(job: TriggerJob, persona: PersonaSpec,
     # index yet = nothing to join: skip before any model call (zero cost).
     if not await asyncio.to_thread(store.has_index, job.project_id):
         log.debug("[memory] no index for project %s — pass skipped", job.project_id)
+        if detail is not None:
+            detail["skipped"] = "the project has no memory index yet"
         return None, 0
 
     spec, role = memory_seat(persona)
@@ -156,6 +162,15 @@ async def run_memory_pass(job: TriggerJob, persona: PersonaSpec,
     items = _items(job, outputs, rulings)
     if items:
         await asyncio.to_thread(store.index, job.company_id, job.project_id, items)
+    if detail is not None:
+        detail["model"] = spec.name
+        detail["rulings"] = [
+            {"index": r.index,
+             "tool": (outputs[r.index].get("tool") if 0 <= r.index < len(outputs) else None),
+             "action": r.action, "summary": (r.summary or "")[:2000]}
+            for r in rulings.rulings
+        ]
+        detail["saved"] = [{"id": i.id, "label": i.label, "text": i.text[:2000]} for i in items]
     usage = result.usage
     record = UsageRecord(
         company_id=job.company_id, project_id=job.project_id, topic_id=job.topic_id,

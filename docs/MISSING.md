@@ -833,6 +833,31 @@ lesson 14) and rebuild the image — fold into the next image build.
   writing decision/fact/preference entries) through the existing route, and
   the chip counts THOSE writes only.
 
+- **AI LOG AS A COMPLETE DIAGNOSTIC STORY — RULED 2026-10-31 (owner: "this
+  md, should be a complete story, a complete diagnostic, like what search
+  from vector db, what from system prompt, what from file … how its compact,
+  and how its becomes final prompt and what returned by model, then any
+  response by tool … after this app stabalize, i want to focus on how our
+  context is being built" … "ok, record it, its very important, i was
+  expecting this from log").** Trigger: the magnifier dialog rendered half
+  hidden, and the owner's call (better than Claude's audit-page proposal):
+  a **downloadable .md of a whole topic** for owner/admin, read in any
+  editor or dropped into any model to investigate. The file tells, per AI
+  reply: (1) the question; (2) ingredients gathered — persona prompt, brief,
+  history TEXT sent, memory search query + every hit with score, attached
+  files, tool catalog; (3) the TRIMMING story — window, reply cap, budget,
+  each item kept/dropped with token counts; (4) the final prompt exactly as
+  sent; (5) the TOOL LOOP turn by turn (calls, args, results, next turn);
+  (6) response, tokens, cache, latency, cost; (7) what the memory pass saved
+  afterwards. Rules: no secret can ever appear (test-pinned); every download
+  is logged (who/topic/when). Gap found 2026-10-31: the 1.3.0 anatomy holds
+  ~40% of this (sections post-fit, message, history COUNT only, outcome) —
+  items 1, 2-history/retrieval, 4-exact, 5 and 7 are new captures. LATER
+  (the owner's context-building phase, post-launch): decision points in
+  full (router/deep pick reasons), what-if comparisons. Storage: full detail
+  capped per item; 30-day retention for the heavy fields is a follow-up.
+  BUILD STARTED 2026-10-31.
+
 - **AI audit log ("log for all chats").** Project owner/admin can open any AI
   reply and see the whole anatomy: the user's query, what retrieval fetched
   (vector DB hits — and graph DB once that exists), the exact prompt and
