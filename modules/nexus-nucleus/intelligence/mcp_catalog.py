@@ -48,7 +48,11 @@ MCP_CATALOG = [
         # WP4): the install sends the code there, only the portal holds the
         # secret. Connectable once the vendor app's client_id lands here.
         "oauth_preset": {
-            "client_id": "",
+            # The vendor "NeuralOps" OAuth App (owner, 2026-10-31) -- PUBLIC id;
+            # its secret lives only on the portal's oauth-exchange function.
+            # GitHub OAuth Apps issue NON-expiring tokens with no refresh token
+            # (oauth_client.has_usable_token counts that as connected).
+            "client_id": "Ov23liTRtfeWiJ03y4Gp",
             "authorize_endpoint": "https://github.com/login/oauth/authorize",
             "token_endpoint": "https://github.com/login/oauth/access_token",
             "scopes": ["repo", "read:org"],

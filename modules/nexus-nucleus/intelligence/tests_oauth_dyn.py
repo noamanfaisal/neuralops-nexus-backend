@@ -246,6 +246,51 @@ class OAuthRoadsApiTests(MentionRightFixture):
         self.assertEqual(server.get_secrets()["GDRIVE_TOKEN"], "at-portal")
         self.assertEqual(server.get_secrets()["refresh_token"], "rt-portal")
 
+    def test_github_s_non_expiring_token_without_a_refresh_token_counts_as_connected(self):
+        """GitHub OAuth Apps (the vendor app, 2026-10-31) answer a token that
+        never expires and NO refresh token. That is a working connection: the
+        card says connected, the engine gets the token, and a reconnect wipes
+        any stale expiry. An expiring token without a refresh token is usable
+        only until it runs out; no token at all is never connected."""
+        from intelligence.api import _oauth_connected
+        server = self._server(
+            client_id="Ov23liTRtfeWiJ03y4Gp", authorize_endpoint="https://github.com/login/oauth/authorize",
+            token_endpoint="https://github.com/login/oauth/access_token", scopes=["repo", "read:org"],
+            redirect_mode="portal_relay", exchange_mode="portal",
+            exchange_provider="github", token_env_var="GITHUB_TOKEN",
+            expires_at="2020-01-01T00:00:00+00:00",   # left over from an old connection
+        )
+        self.assertFalse(_oauth_connected(server))      # nothing stored yet
+        self.assertFalse(oauth_client.refresh_if_needed(server))
+        state = signing.dumps(
+            {"server_id": str(server.id), "frontend_origin": "http://localhost:3000",
+             "code_verifier": "v", "server_url": "http://x"},
+            salt=oauth_client._SIGNING_SALT,
+        )
+        with self.settings(SUPABASE_OAUTH_EXCHANGE_URL="https://portal.test/fn"), \
+             patch("intelligence.oauth_client.httpx.post") as post:
+            post.return_value = FakeResp(200, {"access_token": "gho_x", "token_type": "bearer",
+                                               "scope": "repo,read:org"})
+            oauth_client.complete_callback(code="the-code", state=state)
+        server.refresh_from_db()
+        self.assertEqual(server.get_secrets()["GITHUB_TOKEN"], "gho_x")
+        self.assertNotIn("expires_at", server.oauth_config)   # the stale expiry is gone
+        self.assertTrue(_oauth_connected(server))
+        with patch("intelligence.oauth_client.httpx.post") as post:
+            self.assertTrue(oauth_client.refresh_if_needed(server))
+            post.assert_not_called()                     # nothing to refresh, ever
+        # an EXPIRING token with no refresh token: fine until it runs out
+        cfg = server.oauth_config
+        cfg["expires_at"] = "2020-01-01T00:00:00+00:00"
+        server.oauth_config = cfg
+        server.save()
+        self.assertFalse(oauth_client.refresh_if_needed(server))
+
+    def test_the_github_tile_carries_the_vendor_app_id(self):
+        r = self.call("get", "/api/v1/mcp-catalog/", self.sara)
+        github = next(e for e in r.json() if e["id"] == "github")
+        self.assertEqual(github["oauth_preset"]["client_id"], "Ov23liTRtfeWiJ03y4Gp")
+
     def test_a_refused_portal_exchange_is_worded_and_the_refresh_rides_the_portal_too(self):
         """Road 2b — the two failure/refresh halves: a portal refusal surfaces
         as the function's own words (never a stack trace), and a stale token's

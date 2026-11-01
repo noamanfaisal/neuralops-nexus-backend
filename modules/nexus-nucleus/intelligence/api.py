@@ -66,7 +66,9 @@ def _company(request):
 
 def _oauth_connected(server) -> bool:
     """
-    True iff a refresh token is stored. Only decrypts for oauth2 servers --
+    True iff signed in: a refresh token is stored, or a non-expiring access
+    token (GitHub OAuth Apps) -- oauth_client.has_usable_token. Only decrypts
+    for oauth2 servers --
     get_secrets() is a Fernet decrypt, and doing it for every static-secrets
     server in a list would be pure waste.
     """
@@ -74,7 +76,8 @@ def _oauth_connected(server) -> bool:
     # here too -- an in-process pydantic-ai capability has nothing to connect.
     if server.auth_type != "oauth2":
         return False
-    return bool(server.get_secrets().get("refresh_token"))
+    from intelligence.oauth_client import has_usable_token
+    return has_usable_token(server)
 
 
 def _model_config_out(config, utility_id: str | None = None) -> ModelConfigOut:

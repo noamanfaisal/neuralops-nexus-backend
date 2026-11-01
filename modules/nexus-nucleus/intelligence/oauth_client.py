@@ -235,6 +235,20 @@ def ensure_client(server) -> tuple[bool, str]:
     return True, ""
 
 
+def has_usable_token(server) -> bool:
+    """Is this OAuth2 server signed in? Either a refresh token is stored (the
+    usual case), OR an access token is stored that never expires -- GitHub
+    OAuth Apps issue exactly that: a non-expiring token and NO refresh token
+    (found 2026-10-31 wiring "Connect with NeuralOps" for GitHub; requiring a
+    refresh token would show a working connection as "not connected")."""
+    cfg = server.oauth_config or {}
+    secrets = server.get_secrets()
+    if secrets.get("refresh_token"):
+        return True
+    access = secrets.get(cfg.get("token_env_var", "OAUTH_ACCESS_TOKEN"))
+    return bool(access) and not cfg.get("expires_at")
+
+
 def refresh_if_needed(server) -> bool:
     """
     Called from internal/api.py right before a server's secrets go to
@@ -251,7 +265,14 @@ def refresh_if_needed(server) -> bool:
     secrets = server.get_secrets()
     refresh_token = secrets.get("refresh_token")
     if not refresh_token:
-        return False  # never connected
+        # No refresh token: usable only while the access token itself is --
+        # a non-expiring one (GitHub OAuth Apps) always, an expiring one
+        # until it runs out. Never connected = no access token at all.
+        if not secrets.get(cfg.get("token_env_var", "OAUTH_ACCESS_TOKEN")):
+            return False
+        expires_at = cfg.get("expires_at")
+        return (not expires_at or timezone.datetime.fromisoformat(expires_at)
+                > timezone.now() + timedelta(seconds=60))
 
     expires_at = cfg.get("expires_at")
     if expires_at and timezone.datetime.fromisoformat(expires_at) > timezone.now() + timedelta(seconds=60):
@@ -291,6 +312,10 @@ def _store_token(server, token: dict) -> None:
 
     if token.get("expires_in"):
         cfg["expires_at"] = (timezone.now() + timedelta(seconds=int(token["expires_in"]))).isoformat()
-        server.oauth_config = cfg
+    else:
+        # A non-expiring token (GitHub OAuth Apps): an expiry left over from an
+        # earlier connection would wrongly mark the new token stale.
+        cfg.pop("expires_at", None)
+    server.oauth_config = cfg
 
     server.save()
