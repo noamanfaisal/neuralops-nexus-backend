@@ -669,6 +669,22 @@ hand-over note; project-level holder sees no picker and mints for themself).
   Atlassian, Google) and every install depends on it. GitHub vendor app
   client_id Ov23liTRtfeWiJ03y4Gp is in mcp_catalog (d828e61); the web app's
   "Connect with NeuralOps" road is built (web 0a13ccb).
+- **"Connect with NeuralOps" — FIRST LIVE CONNECT 2026-11-01 (GitHub).**
+  Relay + portal exchange + vendor app proven end to end: a fake code got
+  GitHub's own "code incorrect or expired" through the function (secrets
+  OK); the owner's Connect stored a token AND a refresh token (this OAuth
+  App issues EXPIRING 8-hour tokens, so the portal refresh road is live);
+  the token opens api.githubcopilot.com/mcp/: 46 tools, 28 read-only.
+  Next vendor apps: Atlassian, then Google Drive (Google's hosted Drive MCP
+  is a Developer Preview — see the 2026-10-31 notes).
+- **Per-USER connections (owner, 2026-11-01: "yes thats good" — to
+  discuss before building).** Today a token belongs to the MCP server ROW
+  in a project: whoever pressed Connect, every persona in that project acts
+  on GitHub as THAT account for everyone. Wanted later: each person's own
+  account used when they talk to the persona (a token per user per server,
+  a "Connect your account" prompt on first use, an unattended run falling
+  back to the row's token or refusing). Open: who may use the shared row
+  token; what a schedule uses; how the approval card names the account.
 - **Step 8 distribution half** — rebuild the PRODUCTION profile around the
   unified image's new engine (nexus-ai-new semantics, chromadb retirement),
   publish the image. Large; its own step.
