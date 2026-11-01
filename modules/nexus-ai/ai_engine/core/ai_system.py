@@ -44,7 +44,7 @@ from ai_engine.core.turn_rules import (
     step_context_section,
 )
 from ai_engine.output_types import finalise_reply, resolve_output_spec
-from ai_engine.output_types.prompting import UNATTENDED_RULE, output_instruction_block
+from ai_engine.output_types.prompting import UNATTENDED_RULE, format_was_guessed, output_instruction_block
 from ai_engine.output_types.registry import OutputTypeRegistry
 from ai_engine.core.specs import (
     LoadedSet,
@@ -242,9 +242,13 @@ class PydanticAISystem:
                 resolved_type, resolved_spec = await resolve_output_spec(
                     job.output_type, job.message, bundle.history,
                     persona_default=persona.output_type)
+            # A format the classifier guessed (no directive, no persona
+            # default) is offered, not forced — found live 2026-11-01.
+            guessed = (not preflight_turn and resolved_type != "text"
+                       and format_was_guessed(job.output_type, persona.output_type))
             block = output_instruction_block(
                 resolved_spec.system_instruction if resolved_spec else None,
-                allow_choice=job.interactive)
+                allow_choice=job.interactive, guessed=guessed)
             if block:
                 plan = dc_replace(plan, instructions=plan.instructions + (
                     PromptSection(kind="output_format", priority=85, stable=False,

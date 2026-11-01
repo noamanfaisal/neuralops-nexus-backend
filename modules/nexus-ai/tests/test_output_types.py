@@ -277,6 +277,33 @@ async def test_ot15_an_unattended_run_never_asks(harness):
     assert kind == "choice"
 
 
+async def test_ot16_a_guessed_format_is_an_offer_an_asked_one_a_contract(harness):
+    """Found live 2026-11-01: "use the code graph to index /code/nexus-ai"
+    was CLASSIFIED as a chart (the word "graph": chart 0.646 vs text 0.550,
+    a wider margin than a real plot request), and the hard contract turned
+    an indexing report into a bar chart. A format the classifier guessed — no
+    directive, no persona default — now carries a plain-text way out; one the
+    person asked for (@chart) or the persona's default stays strict. A guessed
+    turn answered in plain words lands as text."""
+    from ai_engine.output_types.prompting import (
+        GUESSED_FORMAT_ESCAPE, format_was_guessed, output_instruction_block)
+    from ai_engine.output_types.registry import OutputTypeRegistry
+
+    assert format_was_guessed(None, None) and format_was_guessed("auto", " Auto ")
+    assert not format_was_guessed("chart", None)       # the person asked
+    assert not format_was_guessed(None, "table")       # the persona's default
+    chart = OutputTypeRegistry.get("chart").system_instruction
+    assert GUESSED_FORMAT_ESCAPE in output_instruction_block(chart, guessed=True)
+    assert GUESSED_FORMAT_ESCAPE not in output_instruction_block(chart)
+    # the way out lands as text: plain words on a chart turn are text
+    _, kind, render, _ = finalise_reply("Indexed /code/nexus-ai: 107 files, job finished.", "chart")
+    assert (kind, render) == ("text", "text")
+    # end to end: an explicit @chart turn is still the strict contract
+    harness.provider.script.text = f"<<<OUTPUT:chart>>>\n{CHART}\n<<<END_OUTPUT>>>"
+    await harness.trigger(harness.job(output_type="chart"))
+    assert "inferred from the wording" not in str(harness.provider.requests[-1])
+
+
 async def test_ot5_plain_text_turn_is_untouched(harness):
     """Item 23 — auto + a plain answer: the Layer 0 stream, byte for byte.
     The classifier resolves an ordinary question to 'text'; the reply's content

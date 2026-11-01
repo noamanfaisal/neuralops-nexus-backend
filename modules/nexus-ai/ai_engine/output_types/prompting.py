@@ -38,13 +38,41 @@ UNATTENDED_RULE = (
 )
 
 
+# A format the CLASSIFIER guessed from the wording — nobody asked for it.
+# Found live 2026-11-01: "use the code graph to index /code/nexus-ai" scored
+# chart 0.646 vs text 0.550 (the word "graph"), a wider margin than a real
+# "plot 3,1,4,1,5" — so no threshold separates them, and the hard "exactly
+# this structure, nothing else" contract turned an indexing report into a
+# bar chart of outcome counts. A guessed format is therefore an offer: the
+# model keeps it when the answer really is that shape, and answers in plain
+# text otherwise (no markers → finalise_reply lands it as text).
+GUESSED_FORMAT_ESCAPE = (
+    "This format was inferred from the wording of the request — the person did not ask for it. Use it "
+    "only if the answer naturally is that shape. If the answer is a status, a report of what you did, "
+    "an explanation or anything else, ignore the format above and answer in plain text with no "
+    "<<<OUTPUT:...>>> markers at all."
+)
+
+
+def format_was_guessed(explicit: str | None, persona_default: str | None) -> bool:
+    """True when the resolver will fall through to the classifier: no
+    directive from the person and no default format on the persona."""
+    def unset(value: str | None) -> bool:
+        return (value or "").strip().lower() in ("", "auto")
+    return unset(explicit) and unset(persona_default)
+
+
 def output_instruction_block(system_instruction: str | None,
-                             allow_choice: bool = True) -> str | None:
+                             allow_choice: bool = True,
+                             guessed: bool = False) -> str | None:
     """The section text for the resolved type, 0.8.0's shape kept. An
-    unattended run (allow_choice=False) never gets the choice exception."""
+    unattended run (allow_choice=False) never gets the choice exception; a
+    guessed format (guessed=True) gets the plain-text way out."""
     if not system_instruction:
         return None
     block = system_instruction
+    if guessed:
+        block = f"{block}\n\n{GUESSED_FORMAT_ESCAPE}"
     if allow_choice and not any(f"<<<OUTPUT:{name}>>>" in system_instruction for name in TYPES_WITHOUT_CHOICE):
-        block = f"{system_instruction}\n\n{CHOICE_EXCEPTION}"
+        block = f"{block}\n\n{CHOICE_EXCEPTION}"
     return f"--- OUTPUT FORMAT INSTRUCTION ---\n{block}"
