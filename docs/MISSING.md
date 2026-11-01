@@ -947,6 +947,23 @@ lesson 14) and rebuild the image — fold into the next image build.
   OWNER: `manage.py migrate` (0045) + `manage.py seed_permissions`
   (project.audit → Admin/Owner) ride the next round; restart BOTH
   containers (engine now writes the log).
+- **BLOCKER FOR LAUNCH (found 2026-10-31): stdio MCP servers cannot run at
+  all.** The engine refuses them (toolset_builder.py: "stdio MCP server … is
+  not supported yet") and nucleus never dials them for a tool list
+  (intelligence/api.py: "stdio tool lists arrive when stdio dialing
+  lands"). Every catalog tile whose command is `npx …`/`uvx …` is therefore
+  dead: GitHub, Google Drive, Neo4j, Bitbucket, AWS, Postgres, SQLite,
+  Slack, Sentry, Git. Only URL tiles work (Atlassian hosted, Vercel, Data
+  Pod). Options under discussion with the owner: (A) a bridge sidecar that
+  runs stdio servers and exposes each over streamable HTTP (engine already
+  speaks HTTP), or (B) stdio support inside the engine. Until decided, hide
+  dead tiles. GitHub has an official HOSTED server
+  (https://api.githubcopilot.com/mcp/, PAT as bearer) that would work today.
+  Owner's graph ask 2026-10-31 is CodeGraphContext
+  (github.com/CodeGraphContext/CodeGraphContext, MIT, embedded KuzuDB/
+  FalkorDB-Lite — NOT Neo4j: "big no" to a Neo4j container) — also stdio,
+  so it rides whichever option is chosen. DISCUSS BEFORE CODING.
+
 - **Connector tiles with icons.** The add-MCP screen shows ready-made tiles
   (icon + one click to configure) for: GitHub, Bitbucket, a graph-DB context
   MCP, Atlassian, AWS, Google, Vercel, draw.io/charts (owner's list, extended
