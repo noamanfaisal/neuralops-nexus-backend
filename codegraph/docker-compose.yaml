@@ -14,6 +14,12 @@ services:
   codegraph:
     build: .
     container_name: codegraph-${NAME:?set NAME in .env}
+    environment:
+      # CodeGraphContext's own path guard: it indexes ONLY under its working
+      # directory or these roots. Without this every add_code_to_graph is
+      # refused ("outside the allowed roots" — seen live 2026-11-01). Exactly
+      # the mounted code, nothing else.
+      CGC_ALLOWED_ROOTS: /code
     volumes:
       - ${CODE_PATH:?set CODE_PATH in .env}:/code:ro
       - graph:/home/cgc/.codegraphcontext
