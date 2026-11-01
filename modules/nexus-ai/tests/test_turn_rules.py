@@ -79,6 +79,25 @@ async def test_p1_preflight_turn_strips_tools_and_answers_as_a_plan(harness, tmp
     assert "Tools available" not in sent
 
 
+async def test_p1b_the_plan_turn_knows_the_tools_by_name_but_cannot_call_them(harness, tmp_path):
+    """Preflight — the planner plans with the REAL tools (found live
+    2026-10-31: blind, it invented tool names and never chose a newly
+    attached draw.io server). The prompt lists each catalog tool by its
+    model-facing name under the after-approval heading with the no-invention
+    rule; still nothing callable but ask_user, and no schema rides."""
+    harness.nucleus.persona = _fs_persona(harness, tmp_path)
+    harness.provider.script.text = f"<<<OUTPUT:preflight>>>\n{PLAN_JSON}\n<<<END_OUTPUT>>>"
+    events = await harness.trigger(harness.job(preflight=True))
+    assert _by_type(events, "message_done")
+    body = harness.provider.requests[-1]
+    names = [t["function"]["name"] for t in body.get("tools", [])]
+    assert names == ["ask_user"]
+    sent = json.dumps(body)
+    assert "Tools you can plan with" in sent
+    assert "- filesystem: Read, list and write files" in sent
+    assert "never invent one" in sent
+
+
 async def test_p2_approved_plan_restores_tools_and_rides_protected(harness, tmp_path):
     """Preflight — the approved plan comes back as its own block, tools on.
     approved_plan on the same persona: the capability schemas are BACK in the
@@ -97,6 +116,7 @@ async def test_p2_approved_plan_restores_tools_and_rides_protected(harness, tmp_
     assert "carry out these steps and nothing beyond them" in sent
     assert "Create out.txt" in sent
     assert "<<<OUTPUT:preflight>>>" not in sent
+    assert "Tools you can plan with" not in sent  # the acting turn has the real catalog
 
 
 async def test_p3_preflight_on_a_toolless_persona_passes_through(harness):

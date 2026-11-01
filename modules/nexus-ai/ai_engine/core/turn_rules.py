@@ -29,6 +29,13 @@ from ai_engine.core.specs import PromptSection, ToolCatalogEntry
 STEP_HEADING = "Previous step's output — this step builds on it:"
 CLIP_NOTE = "\n[… clipped: the previous step's output was longer]"
 PLAN_HEADING = "Approved plan — carry out these steps and nothing beyond them:"
+PLAN_TOOLS_HEADING = ("Tools you can plan with — they run only AFTER the plan is "
+                      "approved, never on this turn:")
+PLAN_TOOLS_RULE = ("Name tools in each step's \"tools\" exactly as written above. "
+                   "A tool not on this list does not exist — never invent one. "
+                   "When a listed tool is made for the job (a diagram tool for a "
+                   "diagram, say), plan with it rather than doing the job by hand.")
+_PLAN_TOOL_LINE_MAX = 160
 
 # Sources that change something outside the conversation (legacy
 # ACTING_CAPABILITIES, catalog-based here). Reading the web or thinking
@@ -44,6 +51,19 @@ def acts_with_tools(catalog: Sequence[ToolCatalogEntry]) -> bool:
         entry.source_kind == "mcp" or entry.tool_id in _ACTING_NATIVES
         for entry in catalog
     )
+
+
+def plan_tools_section(catalog: Sequence[ToolCatalogEntry]) -> str:
+    """The preflight turn's tool list: names and one short line each, no
+    schemas — the planner must know what exists (found live 2026-10-31: blind,
+    it invented `mcp:code-graph/search_symbols` and never chose draw.io)."""
+    lines = []
+    for entry in catalog:
+        one_line = " ".join((entry.one_line or "").split())
+        if len(one_line) > _PLAN_TOOL_LINE_MAX:
+            one_line = one_line[:_PLAN_TOOL_LINE_MAX].rstrip() + "…"
+        lines.append(f"- {entry.model_name}: {one_line}" if one_line else f"- {entry.model_name}")
+    return f"{PLAN_TOOLS_HEADING}\n" + "\n".join(lines) + f"\n{PLAN_TOOLS_RULE}"
 
 
 def step_context_section(step_context: str | None, limit: int) -> PromptSection | None:

@@ -41,6 +41,7 @@ from ai_engine.core.nucleus_client import NucleusClient
 from ai_engine.core.turn_rules import (
     acts_with_tools,
     approved_plan_section,
+    plan_tools_section,
     step_context_section,
 )
 from ai_engine.output_types import finalise_reply, resolve_output_spec
@@ -168,6 +169,11 @@ class PydanticAISystem:
             # engine owns the acts-at-all judgement; nucleus only flags.
             preflight_turn = (bool(job.preflight) and not job.approved_plan
                               and acts_with_tools(catalog))
+            # The planner still has to KNOW the tools it is planning with —
+            # names only, no schemas, nothing callable. Without this it
+            # planned blind: invented tool names and never picked a newly
+            # attached server (found live 2026-10-31, draw.io).
+            plan_catalog = list(catalog) if preflight_turn else []
             if preflight_turn:
                 catalog = []
                 loaded = LoadedSet(tool_ids=(), catalog_hash=loaded.catalog_hash)
@@ -218,6 +224,11 @@ class PydanticAISystem:
                 return caps
 
             plan = self._layout.build(persona, bundle, job.message, catalog=catalog)
+            if plan_catalog:
+                plan = dc_replace(plan, instructions=plan.instructions + (
+                    PromptSection(kind="plan_tools", priority=80, stable=False,
+                                  text=plan_tools_section(plan_catalog)),
+                ))
 
             # ── Layer 6 (W6 + preflight): the approved plan rides PROTECTED;
             # a runbook step's previous output rides clipped (turn_rules).

@@ -51,6 +51,22 @@ def _dial_imports():
     return ClientSession, streamable_http_client, httpx2
 
 
+def read_only_hint(annotations) -> bool | None:
+    """The server's readOnlyHint, whichever spelling the installed mcp
+    library uses: 1.x models expose it as `readOnlyHint`, 2.x as
+    `read_only_hint` (found live 2026-10-31: reading only the old name made
+    EVERY tool unknown — draw.io's three read-only tools all asked first).
+    Accepts the model object or a plain dict."""
+    if not annotations:
+        return None
+    for name in ("read_only_hint", "readOnlyHint"):
+        value = (annotations.get(name) if isinstance(annotations, dict)
+                 else getattr(annotations, name, None))
+        if value is not None:
+            return bool(value)
+    return None
+
+
 @router.post("/mcp/tools/", response_model=ToolListResponse)
 async def list_mcp_tools(req: ToolListRequest, _: str = Depends(_verify_key)) -> ToolListResponse:
     """One dial: initialize, list tools, hang up. Any failure — unreachable,
@@ -70,8 +86,7 @@ async def list_mcp_tools(req: ToolListRequest, _: str = Depends(_verify_key)) ->
 
     tools: list[ToolOut] = []
     for tool in result.tools:
-        annotations = getattr(tool, "annotations", None)
-        read_only = getattr(annotations, "readOnlyHint", None) if annotations else None
+        read_only = read_only_hint(getattr(tool, "annotations", None))
         description = (tool.description or "").strip()
         one_line = description.splitlines()[0][:200] if description else ""
         tools.append(ToolOut(name=tool.name, one_line=one_line, read_only=read_only))

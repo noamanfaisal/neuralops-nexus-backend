@@ -87,6 +87,34 @@ async def test_s6c_mcp_tools_lists_names_lines_and_read_hints(harness):
         served.stop()
 
 
+async def test_s6c2_the_read_hint_is_read_in_both_spellings():
+    """Step 6 — the read hint survives the mcp library's rename (found live
+    2026-10-31: the 2.x models spell it read_only_hint, our code read only
+    readOnlyHint, so EVERY tool landed unknown and asked first — draw.io's
+    three read-only tools included). Both spellings, object or dict, answer
+    the same; no annotations stays unknown; an explicit False stays a write."""
+    from types import SimpleNamespace
+
+    from ai_engine.pydantic_ai_system.tools.approval_policy import ApprovalPolicy, ToolSource
+    from fastapi_app.routers.mcp_tools import read_only_hint
+
+    assert read_only_hint(SimpleNamespace(read_only_hint=True)) is True
+    assert read_only_hint(SimpleNamespace(readOnlyHint=True)) is True
+    assert read_only_hint({"read_only_hint": True}) is True
+    assert read_only_hint({"readOnlyHint": False}) is False
+    assert read_only_hint(None) is None
+    assert read_only_hint(SimpleNamespace(destructive_hint=False)) is None
+
+    source = ToolSource(kind="mcp", cap_key="mcp:s1", source_id="s1", slug="draw")
+    policy = ApprovalPolicy()
+    for spelling in ("read_only_hint", "readOnlyHint"):
+        level = policy.runtime_level(tool_name="draw__create_diagram", source=source,
+                                     entry=None, metadata={"annotations": {spelling: True}})
+        assert level == "auto", spelling
+    assert policy.runtime_level(tool_name="draw__create_diagram", source=source,
+                                entry=None, metadata={}) == "ask"
+
+
 async def test_s6d_mcp_tools_unreachable_is_one_clear_502(harness):
     """Step 6 / change 6 — a dead server is a 502 with the reason, never a hang.
     nucleus shows the detail verbatim next to the Refresh button; the admin

@@ -125,7 +125,12 @@ class ApprovalPolicy:
             return "auto"
         if read_only is None:
             annotations = (metadata or {}).get("annotations") or {}
-            if annotations.get("readOnlyHint") is True:
+            if not isinstance(annotations, Mapping):
+                annotations = getattr(annotations, "model_dump", lambda: {})()
+            # both spellings: mcp 1.x readOnlyHint, 2.x read_only_hint
+            # (found live 2026-10-31)
+            if (annotations.get("readOnlyHint") is True
+                    or annotations.get("read_only_hint") is True):
                 return "auto"
             if tool_id in self._clearances:
                 return "auto"  # the topic cleared this unlabeled tool as a read
