@@ -114,8 +114,9 @@ class AISystemFactory:
                 fitter=BudgetFitter(estimate_tokens),  # item 16: selection
                 settings=settings,
             ),
-            registry=ToolRegistry(max_loaded_tools=settings.max_loaded_tools),
-            toolsets=ToolsetBuilder(),
+            registry=ToolRegistry(max_loaded_tools=settings.max_loaded_tools,
+                                  shell_enabled=settings.shell_enabled),
+            toolsets=ToolsetBuilder(shell_enabled=settings.shell_enabled),
             settings=settings,
             store=store,
         )

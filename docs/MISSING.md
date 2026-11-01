@@ -968,6 +968,19 @@ lesson 14) and rebuild the image — fold into the next image build.
   Related, lower: web_fetch can reach internal docker hostnames (SSRF) —
   block private/internal addresses in web_fetch before launch.
   OWNER TO RULE: option (1) now + (2) post-launch is Claude's recommendation.
+  **RULED + BUILT 2026-11-01 21:16 (owner: "yes … lets move to next"):
+  option (1).** Engine switch SHELL_ENABLED (default OFF): the shell is
+  never offered (ToolRegistry) nor built (ToolsetBuilder), whatever a
+  project's row says — no data migration. Web: features.sandboxedShell=false
+  → Shell shows "Coming soon" with the reason, can't be ticked on (a row
+  that has it can untick), and isn't a starting tick for new rows. Tests:
+  engine test_l1_the_shell_is_off_unless_switched_on (the suite runs with it
+  ON to keep the shell tests); web capability-editor off-state block.
+  TESTER-GUIDE T-21 now uses a file write; T-21b pins the off state.
+  SSRF CHECKED, NO WORK NEEDED: web_fetch(local=True) builds pydantic-ai's
+  web_fetch_tool with allow_local_urls=False — verified live: nucleus-dev,
+  127.0.0.1, the docker gateway and 169.254.169.254 are all refused.
+  (2) — the sandboxed shell — stays post-launch with the runner.
 
 - **BLOCKER FOR LAUNCH (found 2026-10-31): stdio MCP servers cannot run at
   all.** The engine refuses them (toolset_builder.py: "stdio MCP server … is

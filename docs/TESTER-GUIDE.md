@@ -116,11 +116,18 @@ immediately.
 
 ## 6. Tools, approvals, questions
 
-**T-21 — Tool approval card.** Give the persona shell capability with
-per-tool level **ask**. Ask it to list files in the project folder.
-Expect: an approval card appears; **Deny** first → the persona copes
-without the tool; ask again and **Approve** → a real tool row and real
-output.
+**T-21 — Tool approval card.** (The shell is OFF for 1.x — see T-21b; this
+case uses a file write, which always asks.) Ask the persona to "save a
+file approval-test.md with one line". Expect: an approval card appears;
+**Deny** first → the persona copes without the tool and nothing is
+written; ask again and **Approve** → a real tool row and the file in the
+Files pane.
+
+**T-21b — The shell is off (security).** In a project's MCP tab, edit its
+built-in capabilities: **Shell** shows "Coming soon" with the reason, and
+can't be ticked on (a row that has it can still untick it). Ask any persona
+"run `ls /`" — expect no shell tool run and an honest "I can't run commands
+here", never an invented listing.
 
 **T-22 — Persona asks you.** Give it a task missing one detail ("book the
 meeting at the usual time" when no usual time exists).

@@ -53,3 +53,11 @@ class EngineSettings:
     # Item 46 (Layer 6): delegation bounds — calls per reply, seconds per call.
     delegation_max_calls: int = field(default_factory=lambda: int(_env("DELEGATION_MAX_CALLS", "3")))
     delegation_timeout_seconds: float = field(default_factory=lambda: float(_env("DELEGATION_TIMEOUT_SECONDS", "600")))
+    # SECURITY (found live 2026-11-01, owner's go 21:16): the harness Shell
+    # checks only the command NAME, never the paths in its arguments, and runs
+    # as the engine's own user — so `cat` could read outside the project,
+    # down to /proc/<pid>/environ and the engine's secrets. OFF until commands
+    # run in a sandbox (the runner, docs/MISSING.md). Off means the shell is
+    # never offered to the model and never built, whatever a project's
+    # capability row says. Only turn on for a trusted, single-user install.
+    shell_enabled: bool = field(default_factory=lambda: _env("SHELL_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on"))

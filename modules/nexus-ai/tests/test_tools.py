@@ -205,6 +205,42 @@ async def test_l1_loaded_native_schema_reaches_the_request(harness):
     assert "Tools available in this conversation" in json.dumps(body["messages"])
 
 
+async def test_l1_the_shell_is_off_unless_switched_on(harness):
+    """SECURITY (found live 2026-11-01): the harness Shell checks only the
+    command name, never argument paths, and runs as the engine's user — a
+    persona listed /nexus/ai (engine source) and `cat` could reach the
+    engine's secrets. Production default: SHELL_ENABLED off → the shell is
+    neither offered nor built, whatever the project's capability row says;
+    the persona's other capabilities are untouched."""
+    import os
+
+    from ai_engine.core.config import EngineSettings
+
+    saved = os.environ.pop("SHELL_ENABLED", None)
+    try:
+        assert EngineSettings().shell_enabled is False  # the default is OFF
+        persona = make_persona(openai_model(harness))
+        persona["capabilities"] = [{"id": "cap1", "name": "defaults", "capability_config": {
+            "shell": {"cwd": "/tmp", "allowed_commands": ["ls", "cat"]},
+            "web_search": {"local": "duckduckgo"}}}]
+        harness.nucleus.persona = persona
+        events = await harness.trigger()
+        assert [e for e in events if e["type"] == "message_done"]
+        body = harness.provider.requests[-1]
+        tools = json.dumps(body.get("tools") or []).lower()
+        assert "run_command" not in tools          # never built
+        assert "search" in tools                   # the rest still works
+        catalog = json.dumps(body["messages"])
+        assert "- shell:" not in catalog           # never offered
+        # pure units agree
+        spec = _persona_spec(capabilities=persona["capabilities"])
+        assert "shell" not in [e.tool_id for e in ToolRegistry(shell_enabled=False).catalog_for(spec)]
+        assert "shell" in [e.tool_id for e in ToolRegistry(shell_enabled=True).catalog_for(spec)]
+    finally:
+        if saved is not None:
+            os.environ["SHELL_ENABLED"] = saved
+
+
 async def test_l1_catalog_section_is_stable_across_turns(harness):
     """Item 1 / item 15 — the catalog section is byte-identical across turns.
     Two triggers in the same topic produce the same system content and the

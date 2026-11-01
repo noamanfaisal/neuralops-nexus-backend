@@ -73,6 +73,12 @@ class UnsupportedToolSourceError(ValueError):
 
 
 class ToolsetBuilder:
+    def __init__(self, shell_enabled: bool = True) -> None:
+        # Defence in depth next to ToolRegistry's catalog filter: with the
+        # shell off (production default, EngineSettings.shell_enabled) it is
+        # never built, even if a stale loaded set still names it.
+        self._shell_enabled = shell_enabled
+
     def build(self, loaded: LoadedSet, catalog: list[ToolCatalogEntry],
               persona: PersonaSpec, *, interactive: bool = True,
               clearances: frozenset[str] | set[str] = frozenset(),
@@ -93,6 +99,9 @@ class ToolsetBuilder:
         for key, config in configs.items():
             if key not in eligible_ids:
                 continue  # explicitly off — out of the catalog entirely
+            if key == "shell" and not self._shell_enabled:
+                log.warning("shell capability skipped — SHELL_ENABLED is off (not sandboxed yet)")
+                continue
             if key == "setup":
                 # setup-copilot: the gateway's admin tools, mounted inside as a
                 # native-like capability — the gate's ACTING set makes the six

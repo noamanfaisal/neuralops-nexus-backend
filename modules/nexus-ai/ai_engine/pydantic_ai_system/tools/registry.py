@@ -47,8 +47,11 @@ def server_slug(name: str) -> str:
 
 
 class ToolRegistry:
-    def __init__(self, max_loaded_tools: int = 12) -> None:
+    def __init__(self, max_loaded_tools: int = 12, shell_enabled: bool = True) -> None:
         self.max_loaded_tools = max_loaded_tools
+        # False in production unless SHELL_ENABLED (EngineSettings.shell_enabled):
+        # the shell isn't confined to the project folder, so it is never offered.
+        self.shell_enabled = shell_enabled
 
     # ── item 3: the catalog ────────────────────────────────────────────────
     def catalog_for(self, persona: PersonaSpec) -> list[ToolCatalogEntry]:
@@ -58,6 +61,8 @@ class ToolRegistry:
         for row in persona.capabilities:
             for raw_key in (row.get("capability_config") or {}):
                 key = normalize_key(raw_key)
+                if key == "shell" and not self.shell_enabled:
+                    continue  # security: off until commands run in a sandbox
                 one_line, read_only = NATIVE_TOOLS.get(key, (f"The {key} capability", None))
                 entries.append(ToolCatalogEntry(
                     tool_id=key, model_name=key, source_id=str(row.get("id", key)),

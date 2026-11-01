@@ -210,6 +210,10 @@ def servers(provider: FakeProvider, nucleus: FakeNucleus):
     # item 23: the output-type classifier runs on the hash embedder in tests —
     # deterministic, no model downloads; production defaults to fastembed.
     os.environ["CLASSIFIER_EMBEDDER"] = "hash"
+    # The shell is OFF in production (not sandboxed yet — docs/MISSING.md);
+    # the suite keeps its shell tests by turning it on here, and the switch
+    # itself is pinned by test_l1_the_shell_is_off_unless_switched_on.
+    os.environ["SHELL_ENABLED"] = "true"
     # the DB was wiped at session start (probe) — a stale config cache from an
     # earlier run must go with it, the registry is the truth (rule iii)
     import shutil
