@@ -947,6 +947,28 @@ lesson 14) and rebuild the image — fold into the next image build.
   OWNER: `manage.py migrate` (0045) + `manage.py seed_permissions`
   (project.audit → Admin/Owner) ride the next round; restart BOTH
   containers (engine now writes the log).
+- **SECURITY — LAUNCH BLOCKER (found 2026-11-01 live): the shell capability
+  is NOT confined to the project folder.** The harness Shell checks only the
+  COMMAND NAME against allowed_commands, never the paths in its arguments,
+  and runs in the engine container as the engine's own user. Seen live: a
+  persona ran `ls /nexus/ai` (the engine's source) and probed `/code`. With
+  `cat`/`grep`/`cp` allowed (the demo project's row allows all three), a
+  persona can very likely read any file the engine user can — including
+  /proc/<pid>/environ, where the engine keeps INTERNAL_API_KEY,
+  POSTGRES_PASSWORD and FIELD_ENCRYPTION_KEY (which decrypts every stored
+  provider key). Reachable by any member who can mention a shell persona, and
+  by prompt injection through web_fetch. The FILESYSTEM tool is confined
+  (root_dir + protected patterns — the persona was refused outside it).
+  FIX OPTIONS: (1) for launch, shell OFF everywhere (template + existing
+  rows) and shown as "Coming soon — sandboxed shell"; (2) the real fix runs
+  commands in a sandbox — the runner (separate container per project, only
+  the project folder mounted, no secrets in its env, different uid) or a
+  namespace jail (bubblewrap) with a cleared environment. Clearing the child
+  env alone is NOT enough: /proc/1/environ of the same uid stays readable.
+  Related, lower: web_fetch can reach internal docker hostnames (SSRF) —
+  block private/internal addresses in web_fetch before launch.
+  OWNER TO RULE: option (1) now + (2) post-launch is Claude's recommendation.
+
 - **BLOCKER FOR LAUNCH (found 2026-10-31): stdio MCP servers cannot run at
   all.** The engine refuses them (toolset_builder.py: "stdio MCP server … is
   not supported yet") and nucleus never dials them for a tool list
