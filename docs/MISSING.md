@@ -655,6 +655,18 @@ hand-over note; project-level holder sees no picker and mints for themself).
   (after the client_ids land): the "Connect with NeuralOps" tile pre-fill —
   today's create dialog copies no oauth fields from a preset, so the button
   stays rightly hidden until then.
+- **Relay page hosting (owner, 2026-10-31).** The callback is
+  `https://neuralopsnexus.ai/oauth/relay` (NEURALOPS_OAUTH_RELAY_URL; the
+  exchange function's DEFAULT_RELAY). The domain is registered at Hostinger
+  with no hosting plan, so the page goes on **Netlify** for now (free;
+  `oauth/relay/index.html`; A @ → 75.2.60.5 + CNAME www at Hostinger DNS).
+  LATER: move to **Cloudflare Pages** (free, unlimited bandwidth, can host
+  the marketing site + docs too; DNS moves to Cloudflare, the registration
+  stays at Hostinger; copy MX records before switching nameservers). The
+  address must NEVER change or go dark — every vendor app (GitHub,
+  Atlassian, Google) and every install depends on it. GitHub vendor app
+  client_id Ov23liTRtfeWiJ03y4Gp is in mcp_catalog (d828e61); the web app's
+  "Connect with NeuralOps" road is built (web 0a13ccb).
 - **Step 8 distribution half** — rebuild the PRODUCTION profile around the
   unified image's new engine (nexus-ai-new semantics, chromadb retirement),
   publish the image. Large; its own step.
