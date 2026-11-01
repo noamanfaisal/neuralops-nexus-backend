@@ -392,6 +392,13 @@ def create_mcp_server_standalone(company, data: dict):
     if not project:
         raise ValueError("Project not found.")
 
+    # Launch ruling 2026-10-31: NeuralOps dials HTTP tool servers only until
+    # the runner lands — a stdio row would be saved and then never work.
+    if not data.get("is_internal") and data.get("transport", "http") == "stdio":
+        raise ValueError("NeuralOps connects to tool servers over HTTP for now — "
+                         "servers that run as a local command (npx/uvx) are coming soon. "
+                         "Give the server's https:// address instead.")
+
     # Built then saved rather than .create()d, so normalisation lands before
     # the row hits the database and the constraint stays a backstop.
     server = MCPServer(company=company, project=project, **data)

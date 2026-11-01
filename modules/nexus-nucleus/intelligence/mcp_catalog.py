@@ -30,15 +30,19 @@ MCP_CATALOG = [
     {
         "id": "github",
         "title": "GitHub",
-        "description": "Issues, pull requests, code search and file contents in a repository.",
+        "description": "GitHub's own hosted server: issues, pull requests, code search and file contents in your repositories.",
         "category": "Software",
-        "server_type": "local",
-        "transport": "stdio",
-        "command": "npx -y @modelcontextprotocol/server-github",
-        "url": None,
+        # Launch ruling 2026-10-31: GitHub's HOSTED server (streamable HTTP,
+        # the PAT rides as Authorization: Bearer — exactly how a static
+        # server's client_secret is sent) replaces the npx stdio package,
+        # which NeuralOps cannot launch yet.
+        "server_type": "hosted",
+        "transport": "http",
+        "command": None,
+        "url": "https://api.githubcopilot.com/mcp/",
         "auth_type": "static_secrets",
-        "needs": ["A GitHub personal access token with the scopes you want the persona to have"],
-        "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+        "needs": ["A GitHub personal access token (fine-grained is best) with only the repositories and permissions you want the persona to have — paste it as the server's secret"],
+        "docs": "https://github.com/github/github-mcp-server",
         # GitHub's token exchange DEMANDS the client secret even for PKCE
         # clients — covered by the portal's oauth-exchange function (road 2b,
         # WP4): the install sends the code there, only the portal holds the
@@ -268,9 +272,28 @@ MCP_CATALOG = [
 CATEGORIES = ["Software", "Data", "Communication", "Documents", "Infrastructure"]
 
 
+# Launch ruling 2026-10-31 (owner: "right now we can focus on mcp … streaming
+# http, we can postpone it"): NeuralOps dials HTTP tool servers only — stdio
+# (`npx …` / `uvx …`) waits for the runner (docs/MISSING.md). A stdio entry
+# is still listed, so people see what is coming, but marked unavailable and
+# the app shows it as "Coming soon" instead of a tile that fails on use.
+COMING_SOON = ("Coming soon — this server runs as a local command, and NeuralOps "
+               "connects to tool servers over HTTP for now.")
+
+
+def _with_availability(entry: dict) -> dict:
+    out = dict(entry)
+    available = out.get("transport") != "stdio"
+    out["available"] = available
+    out["unavailable_reason"] = None if available else COMING_SOON
+    return out
+
+
 def catalog() -> list[dict]:
-    """The catalog as the app reads it. A copy, so a caller cannot edit the module."""
-    return [dict(entry) for entry in MCP_CATALOG]
+    """The catalog as the app reads it. A copy, so a caller cannot edit the
+    module; available entries first, each carrying `available`."""
+    entries = [_with_availability(e) for e in MCP_CATALOG]
+    return [e for e in entries if e["available"]] + [e for e in entries if not e["available"]]
 
 
 def entry(entry_id: str) -> dict | None:

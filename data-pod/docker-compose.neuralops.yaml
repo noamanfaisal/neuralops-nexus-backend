@@ -1,0 +1,27 @@
+# Run the data pod ON THE SAME BOX as NeuralOps, reachable only from inside.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.neuralops.yaml up -d --build
+#
+# The pod joins NeuralOps' own docker network, so the engine dials it by name:
+#
+#   MCP server URL in NeuralOps:   http://datapod:8900/mcp
+#
+# and NOTHING needs to be open to the internet. Keep the published ports on
+# the loopback by setting, in .env:
+#
+#   DATAPOD_PORT=127.0.0.1:8900
+#   MINIO_PORT=127.0.0.1:9000
+#   MINIO_CONSOLE_PORT=127.0.0.1:9001
+#
+# (reach the MinIO console through an SSH tunnel: ssh -L 9001:127.0.0.1:9001
+# <box>, then http://localhost:9001). On a RunPod or a separate VPS, use the
+# plain docker-compose.yaml instead — see README.
+
+services:
+  datapod:
+    networks: [default, neuralops]
+
+networks:
+  neuralops:
+    external: true
+    name: ${NEURALOPS_NETWORK:-neuralops-network}

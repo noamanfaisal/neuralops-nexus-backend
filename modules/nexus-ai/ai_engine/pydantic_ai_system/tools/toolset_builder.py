@@ -132,11 +132,12 @@ class ToolsetBuilder:
             if not whole_server and not tool_names:
                 continue
             if not server.get("url"):
-                # stdio: unverified MCP(local=…) shape on the pinned version —
-                # refused loudly rather than wired wrong (doc, item 3 Open)
-                raise UnsupportedToolSourceError(
-                    f"stdio MCP server {server.get('name')!r} is not supported yet"
-                )
+                # stdio waits for the runner (launch ruling 2026-10-31: HTTP
+                # only for now). Skipped with a warning — one url-less server
+                # must never fail the whole reply (it used to raise here).
+                log.warning("stdio MCP server %r skipped — NeuralOps dials HTTP tool "
+                            "servers only for now", server.get("name"))
+                continue
             mcp = MCP(
                 url=server["url"],
                 id=sid,

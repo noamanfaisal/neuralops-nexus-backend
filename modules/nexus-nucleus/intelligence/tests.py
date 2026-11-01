@@ -516,6 +516,27 @@ class CatalogueTests(MentionRightFixture):
                 self.assertNotIn(leak, blob, e["id"])
         self.assertEqual(len({e["id"] for e in rows}), len(rows))  # ids are unique
 
+    def test_launch_is_http_only_stdio_tiles_say_coming_soon_and_cannot_be_added(self):
+        """Launch ruling 2026-10-31 (owner: "focus on mcp … streaming http,
+        we can postpone it"): NeuralOps can't launch stdio servers yet, so a
+        stdio tile is listed as unavailable with a worded reason, after every
+        available one; GitHub is now its HOSTED http server; and a stdio
+        server can't be created through the API either (it would never run)."""
+        rows = self.call("get", "/api/v1/mcp-catalog/", self.sara).json()
+        for e in rows:
+            self.assertEqual(e["available"], e["transport"] != "stdio", e["id"])
+            self.assertEqual(bool(e["unavailable_reason"]), not e["available"], e["id"])
+        flags = [e["available"] for e in rows]
+        self.assertEqual(flags, sorted(flags, reverse=True))  # available ones first
+        github = next(e for e in rows if e["id"] == "github")
+        self.assertTrue(github["available"])
+        self.assertEqual((github["transport"], github["url"]), ("http", "https://api.githubcopilot.com/mcp/"))
+        r = self.call("post", "/api/v1/mcp-servers/", self.owner, {
+            "name": "Local git", "project_id": str(self.p1.id), "server_type": "local",
+            "transport": "stdio", "command": "uvx mcp-server-git"})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("over HTTP for now", r.json()["detail"])
+
     def test_the_persona_catalogue_pre_fills_a_real_create_dialog(self):
         from intelligence import persona_catalog
         from intelligence.builtin_routines import BUILTIN_ROUTINES

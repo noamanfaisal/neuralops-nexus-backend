@@ -101,6 +101,30 @@ def test_l1_catalog_server_without_stored_tools_is_one_entry():
     assert entry.tool_id == "mcp:s1" and entry.read_only is None
 
 
+def test_l1_a_stdio_server_is_never_offered_and_never_fails_the_reply():
+    """Launch ruling 2026-10-31: NeuralOps dials HTTP tool servers only. A
+    url-less (stdio) server attached to a persona — even one with no stored
+    tool list, which used to become a server-level entry — is left out of the
+    catalog, and the builder skips it instead of raising (a raise there failed
+    the WHOLE reply). The HTTP server next to it is untouched."""
+    from ai_engine.core.specs import LoadedSet
+    from ai_engine.pydantic_ai_system.tools.toolset_builder import ToolsetBuilder
+
+    stdio = _mcp_server("s-std", "Local Git", None)
+    stdio.update(url=None, transport="stdio", command="uvx mcp-server-git")
+    http = _mcp_server("s-gh", "GitHub", [{"name": "search", "description": "Search code", "read_only": True}])
+    persona = _persona_spec(mcp_servers=[stdio, http])
+    catalog = ToolRegistry().catalog_for(persona)
+    assert [e.tool_id for e in catalog if e.source_kind == "mcp"] == ["mcp:s-gh/search"]
+    # even if a stale loaded set still names the stdio server, building works
+    caps = ToolsetBuilder().build(
+        LoadedSet(tool_ids=("mcp:s-std", "mcp:s-gh/search"), catalog_hash="h"),
+        catalog + [type(catalog[0])(tool_id="mcp:s-std", model_name="local_git", source_id="s-std",
+                                    source_kind="mcp", one_line="", read_only=None)],
+        persona)
+    assert caps  # built, no exception
+
+
 def test_l1_catalog_natives_from_capability_config():
     """Item 3 — native capabilities are catalogued from capability_config.
     Keys arrive as display names or field names ('Web Search' / 'web_search');

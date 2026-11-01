@@ -490,6 +490,9 @@ class MCPCatalogEntryOut(Schema):
     # three only). Non-secret by construction — a public client_id, endpoints,
     # scopes, redirect_mode. None on every other entry.
     oauth_preset: Optional[dict] = None
+    # Launch ruling 2026-10-31: stdio entries are listed but not addable yet.
+    available: bool = True
+    unavailable_reason: Optional[str] = None
 
 
 class PersonaCatalogEntryOut(Schema):

@@ -963,6 +963,39 @@ lesson 14) and rebuild the image — fold into the next image build.
   (github.com/CodeGraphContext/CodeGraphContext, MIT, embedded KuzuDB/
   FalkorDB-Lite — NOT Neo4j: "big no" to a Neo4j container) — also stdio,
   so it rides whichever option is chosen. DISCUSS BEFORE CODING.
+  **RULED 2026-10-31 (owner: "right now we can focus on mcp (whether on
+  streaming http) we can postpone it"): LAUNCH IS HTTP-ONLY.** Built same
+  day: catalog marks stdio entries available=false + "Coming soon" (listed
+  last, no Add button); the API refuses creating a stdio server in words;
+  the engine skips a url-less server instead of failing the reply, and never
+  offers it to the model; GitHub's tile is now its HOSTED server
+  (https://api.githubcopilot.com/mcp/, PAT as the server secret → Bearer).
+  **POST-LAUNCH DESIGN — THE RUNNER (proposed 2026-10-31, owner to rule
+  the open questions):** NeuralOps keeps speaking ONLY HTTP to tool
+  servers; anything launched as `npx`/`uvx` runs inside a RUNNER — one small
+  image, the same everywhere, exposing each stdio server as streamable HTTP
+  behind a bearer token. Placements: (1) docker on the same box (default
+  from install.sh, internal network only); (2) RunPod / any VPS (HTTPS proxy
+  URL + token — heavy indexing, big CSVs, GPU); (3) SSH mode — the runner
+  runs `ssh user@host "npx -y …"` and the server's stdio travels over SSH,
+  for a box that can't run our image. SSH safety: key pair first, OpenSSH
+  CERTIFICATES (CA-signed, short-lived, centrally revocable) as an option;
+  private key encrypted like every secret, never shown again, never typed
+  in chat; host fingerprint PINNED at add (confirmed once, a changed one is
+  refused); a dedicated restricted remote user (forced command / allow-list:
+  npx/uvx only, no shell, no sudo). Rules for every runner: only
+  Owner/Admin define commands (a command = code execution); the runner
+  never sees secrets.env and gets no docker socket; each server gets only
+  its own token as an env var; project folders mount READ-ONLY;
+  CodeGraphContext keeps ONE GRAPH PER PROJECT (no cross-project code);
+  servers stay warm (no npx re-download per reply); "Check connection" in
+  the add dialog tests runner → SSH → tool list before saving. OPEN
+  QUESTIONS FOR THE OWNER: (a) runner on the same box by default, RunPod/
+  SSH optional? (b) SSH: keys first or certificates from day one? (c)
+  allow-list: npx/uvx only, or also `docker run …`? (d) one runner per
+  server or per project? First users once built: CodeGraphContext (which
+  code is indexed — project folder, a cloned repo, both? watch mode or on
+  demand? also exposed through the gateway?), then the Coming-soon tiles.
 
 - **Connector tiles with icons.** The add-MCP screen shows ready-made tiles
   (icon + one click to configure) for: GitHub, Bitbucket, a graph-DB context
