@@ -1,0 +1,29 @@
+# One code-graph per project, reachable only on NeuralOps' internal network.
+#
+#   cp .env.example .env        # set NAME and CODE_PATH for this project
+#   docker compose -p codegraph-<name> up -d --build
+#
+# In NeuralOps: /add-mcp → Add server → transport HTTP,
+#   URL  http://codegraph-<name>:8811/mcp   (auth: none — internal only)
+# then attach it to the personas of THAT project only.
+#
+# NEVER point CODE_PATH at a folder holding secrets (secrets.env, *.env,
+# database dumps): the container can read everything mounted, read-only or not.
+
+services:
+  codegraph:
+    build: .
+    container_name: codegraph-${NAME:?set NAME in .env}
+    volumes:
+      - ${CODE_PATH:?set CODE_PATH in .env}:/code:ro
+      - graph:/home/cgc/.codegraphcontext
+    networks: [neuralops]
+    restart: unless-stopped
+
+volumes:
+  graph:
+
+networks:
+  neuralops:
+    external: true
+    name: ${NEURALOPS_NETWORK:-neuralops-network}
