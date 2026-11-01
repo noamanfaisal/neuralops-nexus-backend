@@ -133,6 +133,32 @@ easy-install-and-free-trial-plan.
   Hostinger; smtp.resend.com:587, sender no-reply@neuralopsnexus.ai).
   Confirmation emails now reach any address.
 
+**NEXT SESSION — TAKEN BACK BY THE OWNER (2026-11-01 02:27: "what we will
+do tomorrow is ... rectify that install.sh ... to install it in single click
+and how demo will work and place demo link on main site, so that people can
+get 1 hour demo in 1 click").** Agenda, in order:
+1. **install.sh, one click for real** — start from what is BUILT (Phase 1
+   above + upstream rework: Tailscale Funnel or a domain, resume, CLI). Open
+   from EASY-INSTALL-TASKS: 1.3 (`get.neuralopsnexus.ai` short address —
+   now a Vercel project like the relay, or a raw GitHub URL), 1.5 (the
+   owner's proof runs: a fresh local machine via Tailscale, a cloud server
+   via a domain). Also re-check against everything added since 10-25:
+   Data Pod / codegraph / drawio are OPTIONAL extras, not install defaults;
+   SHELL_ENABLED stays off; NEURALOPS_OAUTH_RELAY_URL default is right.
+2. **How the 1-hour demo works** — the 2026-10-28 ruling is an automatic
+   service (website → our FastAPI service → cloud server → Hostinger DNS
+   `<id>.demo.neuralopsnexus.ai` → install → `create_owner --email` →
+   email the link → delete after 1 hour). Status of the developer's private
+   `neuralops-demo` repo (tasks 2.2–2.8) to be checked FIRST — the owner
+   asks the developer. Owner-side prerequisites: which cloud has credits;
+   the Hostinger DNS API token (set on the demo service, never in chat);
+   a demo AI key with a HARD spending limit.
+3. **"Try a 1-hour demo" on neuralopsnexus.ai** — the live site is a
+   Vercel project, NOT `mapax-io/neuralops-nexus-landing` main (its title
+   and description are newer); find the repo/branch in Vercel → Settings →
+   Git first. The button posts an email to the demo service (confirmation +
+   bot check + rate limit), never creates anything client-side.
+
 **EASY INSTALL + DEMO SERVICE — HANDED TO THE DEVELOPER (owner,
 2026-10-28):** the developer owns the whole track, including the open
 decisions, and is finishing it for a merge. Not tracked in this file any
