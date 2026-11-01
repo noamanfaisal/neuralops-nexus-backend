@@ -947,6 +947,27 @@ lesson 14) and rebuild the image — fold into the next image build.
   OWNER: `manage.py migrate` (0045) + `manage.py seed_permissions`
   (project.audit → Admin/Owner) ride the next round; restart BOTH
   containers (engine now writes the log).
+- **SELF-HOSTED PROJECT MANAGEMENT MCP — RECORDED 2026-11-01 22:01 (owner:
+  "can we include one more mcp (like Trello or any project management
+  tool), where the whole server will run at our own … record it").**
+  Recommendation: **Plane** (Jira/Linear-like with Trello-style Kanban
+  boards, cycles/sprints, modules, labels; AGPL-3.0 as a separate service)
+  — the only candidate with an OFFICIAL, maintained MCP
+  (makeplane/plane-mcp-server, MIT, ~30 tools / 207 actions; self-hosted
+  via PLANE_BASE_URL + PLANE_API_KEY + PLANE_WORKSPACE_SLUG, stdio only for
+  self-hosted → wrapped as HTTP with mcp-proxy exactly like codegraph/).
+  Cost: heavy (~8 containers: web, api, workers, Postgres, Redis, file
+  storage; several GB RAM). Light fallback: **Vikunja** (one Go service +
+  DB, AGPL-3.0, community vikunja-mcp). Planka (pure Trello clone) only after
+  checking its v2 licence; community MCPs only.
+  Shape: Plane in its own compose on the box, internal only; a plane-mcp
+  wrapper container on neuralops-network with the API key in its own .env
+  (made by a script, never printed, like data-pod/make_env.py); a catalog
+  tile "http://plane-mcp:<port>/mcp"; writes ask (no readOnlyHint expected —
+  verify). LATER: a Plane project auto-created per NeuralOps project.
+  OPEN for the owner: Plane vs Vikunja; launch vs after (≈half a day);
+  default install vs optional tile (Claude: optional, like the Data Pod).
+
 - **SECURITY — LAUNCH BLOCKER (found 2026-11-01 live): the shell capability
   is NOT confined to the project folder.** The harness Shell checks only the
   COMMAND NAME against allowed_commands, never the paths in its arguments,
