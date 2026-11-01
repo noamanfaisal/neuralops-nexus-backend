@@ -119,6 +119,70 @@ async def test_p2_approved_plan_restores_tools_and_rides_protected(harness, tmp_
     assert "Tools you can plan with" not in sent  # the acting turn has the real catalog
 
 
+async def test_p4_the_approved_plan_s_tools_are_loaded_not_hidden(harness, tmp_path):
+    """Preflight — a tool the approved plan names is LOADED for the run
+    (found live 2026-10-31: the plan named mydraw_io__create_diagram, but the
+    tool sat outside the topic's set, hidden behind search_tools, and the run
+    drew Mermaid by hand). topic_tools=[] would hide every filesystem tool;
+    the plan names `filesystem`, so read_file rides the FIRST request and its
+    read runs with no first-use card. A name that is only a prefix of a
+    longer word never counts."""
+    from ai_engine.core.specs import ToolCatalogEntry
+    from ai_engine.core.turn_rules import planned_tool_ids
+
+    def entry(model_name):
+        return ToolCatalogEntry(tool_id=f"id:{model_name}", model_name=model_name,
+                                source_id="s", source_kind="mcp", one_line="", read_only=True)
+    catalog = [entry("draw__create_diagram"), entry("draw__create"), entry("graph__find_code")]
+    plan = "5. Create the diagram (tools: draw__create_diagram)"
+    assert planned_tool_ids(plan, catalog) == ("id:draw__create_diagram",)
+    assert planned_tool_ids(None, catalog) == ()
+
+    (tmp_path / "data.txt").write_text("PLANNED-42")
+    harness.nucleus.persona = _fs_persona(harness, tmp_path)
+    harness.provider.script.steps = [
+        {"kind": "tool_call", "call_id": "c1", "name": "read_file", "args": {"path": "data.txt"}},
+        {"kind": "text", "text": "It says PLANNED-42."},
+    ]
+    events = await harness.trigger(harness.job(
+        topic_tools=[], preflight=True,
+        approved_plan="1. Read data.txt (tools: filesystem)\n2. Report it"))
+    assert not _by_type(events, "approval_requested")
+    [done] = _by_type(events, "message_done")
+    assert "PLANNED-42" in done["content"]
+    first = [t["function"]["name"] for t in harness.provider.requests[0].get("tools", [])]
+    assert "read_file" in first, f"the planned tool stayed hidden: {first}"
+
+
+async def test_p5_a_guessed_format_never_overrules_an_approved_plan(harness, tmp_path):
+    """Preflight — the plan decides the reply's shape (found live 2026-10-31:
+    "Respond with a Mermaid diagram", guessed from the word "diagram", beat
+    the plan's draw.io step). With the persona on auto and the classifier
+    answering 'diagram': an approved-plan turn carries NO format contract;
+    the same message without a plan still gets the offer, which now also
+    says to prefer a tool made for the job."""
+    from unittest.mock import AsyncMock, patch
+
+    from ai_engine.output_types import classifier
+
+    persona = _fs_persona(harness, tmp_path)
+    persona["prompt"]["output_type"] = "auto"
+    harness.nucleus.persona = persona
+    harness.provider.script.text = "Done — here is the diagram link."
+    with patch.object(classifier, "classify_output_type",
+                      new_callable=AsyncMock, return_value="diagram"):
+        await harness.trigger(harness.job(
+            message="draw a sequence diagram of the login flow",
+            preflight=True, approved_plan="1. Draw it (tools: filesystem)"))
+        planned = json.dumps(harness.provider.requests[-1])
+        await harness.trigger(harness.job(message="draw a sequence diagram of the login flow"))
+        unplanned = json.dumps(harness.provider.requests[-1])
+    assert "inferred from the wording" not in planned
+    assert "Mermaid" not in planned
+    assert "inferred from the wording" in unplanned
+    assert "use the tool rather than writing the format by hand" in unplanned
+
+
 async def test_p3_preflight_on_a_toolless_persona_passes_through(harness):
     """Preflight — a persona that cannot act has nothing to propose.
     preflight=true on a toolless persona: acts_with_tools is false, so the

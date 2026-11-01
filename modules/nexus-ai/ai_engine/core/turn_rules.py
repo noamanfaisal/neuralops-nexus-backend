@@ -22,6 +22,7 @@ kept verbatim.
 """
 from __future__ import annotations
 
+import re
 from typing import Sequence
 
 from ai_engine.core.specs import PromptSection, ToolCatalogEntry
@@ -64,6 +65,21 @@ def plan_tools_section(catalog: Sequence[ToolCatalogEntry]) -> str:
             one_line = one_line[:_PLAN_TOOL_LINE_MAX].rstrip() + "…"
         lines.append(f"- {entry.model_name}: {one_line}" if one_line else f"- {entry.model_name}")
     return f"{PLAN_TOOLS_HEADING}\n" + "\n".join(lines) + f"\n{PLAN_TOOLS_RULE}"
+
+
+def planned_tool_ids(approved_plan: str | None,
+                     catalog: Sequence[ToolCatalogEntry]) -> tuple[str, ...]:
+    """The catalog tools an approved plan names, by their model-facing name
+    as a whole word (`mydraw_io__create_diagram`, never a prefix of a longer
+    name) — the run loads exactly these on top of the topic's set."""
+    text = approved_plan or ""
+    if not text.strip():
+        return ()
+    named = []
+    for entry in catalog:
+        if re.search(rf"(?<![\w]){re.escape(entry.model_name)}(?![\w])", text):
+            named.append(entry.tool_id)
+    return tuple(named)
 
 
 def step_context_section(step_context: str | None, limit: int) -> PromptSection | None:

@@ -42,6 +42,7 @@ from ai_engine.core.turn_rules import (
     acts_with_tools,
     approved_plan_section,
     plan_tools_section,
+    planned_tool_ids,
     step_context_section,
 )
 from ai_engine.output_types import finalise_reply, resolve_output_spec
@@ -177,6 +178,15 @@ class PydanticAISystem:
             if preflight_turn:
                 catalog = []
                 loaded = LoadedSet(tool_ids=(), catalog_hash=loaded.catalog_hash)
+            # The approved plan's tools are LOADED for the run: the person saw
+            # them named in the plan and approved it. Outside the topic's set
+            # they were hidden behind tool search and the run never reached
+            # them (found live 2026-10-31: the plan named
+            # mydraw_io__create_diagram, the run drew Mermaid by hand). Their
+            # own levels still apply — a write still asks.
+            plan_tool_ids = planned_tool_ids(job.approved_plan, catalog)
+            if plan_tool_ids:
+                loaded = _with_tools(loaded, plan_tool_ids)
 
             # Item 46 (Layer 6): delegation — only at depth 0, never on a
             # plan-only preflight turn (a proposal must not act or delegate).
@@ -258,6 +268,14 @@ class PydanticAISystem:
             # default) is offered, not forced — found live 2026-11-01.
             guessed = (not preflight_turn and resolved_type != "text"
                        and format_was_guessed(job.output_type, persona.output_type))
+            if guessed and job.approved_plan:
+                # An approved plan already says what the reply is and how it
+                # is made; a format guessed from the wording must not overrule
+                # it (found live 2026-10-31: "Respond with a Mermaid diagram"
+                # beat the plan's draw.io step). Directives and a persona's
+                # own default still apply.
+                resolved_type, resolved_spec = "text", OutputTypeRegistry.get("text")
+                guessed = False
             block = output_instruction_block(
                 resolved_spec.system_instruction if resolved_spec else None,
                 allow_choice=job.interactive, guessed=guessed)
@@ -406,7 +424,9 @@ class PydanticAISystem:
                     eligible = {entry.tool_id for entry in catalog}
                     hinted = tuple(t for t in escalate.tool_hints if t in eligible)
                     if hinted:
-                        loaded = LoadedSet(tool_ids=hinted, catalog_hash=loaded.catalog_hash)
+                        loaded = _with_tools(
+                            LoadedSet(tool_ids=hinted, catalog_hash=loaded.catalog_hash),
+                            plan_tool_ids)
                 loaded_for_done = loaded.tool_ids
                 request = ReplyRequest(job=job, persona=persona, role=reply_role, plan=plan)
                 async for event in self._generator.generate(
@@ -669,6 +689,14 @@ class PydanticAISystem:
                 raise
         except Exception:
             log.exception("audit log write failed for job %s", job.job_id)
+
+
+def _with_tools(loaded: LoadedSet, tool_ids: tuple[str, ...]) -> LoadedSet:
+    """The loaded set plus these tools, order kept, no duplicates."""
+    extra = tuple(t for t in tool_ids if t not in loaded.tool_ids)
+    if not extra:
+        return loaded
+    return LoadedSet(tool_ids=tuple(loaded.tool_ids) + extra, catalog_hash=loaded.catalog_hash)
 
 
 def _now() -> str:

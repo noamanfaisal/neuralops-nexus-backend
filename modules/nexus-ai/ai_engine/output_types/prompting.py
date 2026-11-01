@@ -50,7 +50,8 @@ GUESSED_FORMAT_ESCAPE = (
     "This format was inferred from the wording of the request — the person did not ask for it. Use it "
     "only if the answer naturally is that shape. If the answer is a status, a report of what you did, "
     "an explanation or anything else, ignore the format above and answer in plain text with no "
-    "<<<OUTPUT:...>>> markers at all."
+    "<<<OUTPUT:...>>> markers at all. If one of your tools is made to produce this (a diagram tool "
+    "for a diagram, say), use the tool rather than writing the format by hand."
 )
 
 
