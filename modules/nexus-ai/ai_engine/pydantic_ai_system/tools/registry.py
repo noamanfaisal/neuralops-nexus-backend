@@ -6,9 +6,9 @@ catalog_for: every tool the persona could use, by name, from what nucleus sent
 dial time, in ToolsetBuilder's MCP connections).
 
 tools_for: the topic's loaded set — job.topic_tools verbatim when nucleus sent
-it (narrow-once-and-hold), else the Layer 1 first-reply rule: all eligible,
-capped by MAX_LOADED_TOOLS, catalog order. Layer 2 replaces exactly that else-
-branch with the router's tool_hints.
+it (narrow-once-and-hold), else the first-reply rule: the tools that best fit
+the message (relevance.first_reply_set), capped by MAX_LOADED_TOOLS. A router
+seat's tool_hints replace that set on the first reply (ai_system).
 """
 from __future__ import annotations
 
@@ -114,9 +114,13 @@ class ToolRegistry:
             # never fatal (a server was detached since the set was stored)
             loaded = tuple(t for t in job.topic_tools if t in set(eligible))
         else:
-            # first reply in the topic, Layer 1: all eligible, capped.
-            # Layer 2 replaces THIS branch with the router's tool_hints.
-            loaded = tuple(eligible[: self.max_loaded_tools])
+            # first reply in the topic: the tools that best fit the message
+            # (keyword match, reads first), capped; a message nothing matches
+            # keeps catalog order. A router seat's tool_hints still replace
+            # this set (ai_system, Layer 2). Found live 2026-11-01: catalog
+            # order loaded GitHub's write tools and hid list_commits.
+            from ai_engine.pydantic_ai_system.tools.relevance import first_reply_set
+            loaded = first_reply_set(catalog, job.message or "", self.max_loaded_tools)
         return LoadedSet(tool_ids=loaded, catalog_hash=_catalog_hash(catalog))
 
 

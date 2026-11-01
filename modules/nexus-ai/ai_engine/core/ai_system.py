@@ -67,6 +67,7 @@ from ai_engine.pydantic_ai_system.reply_generator import ReplyGenerator
 from ai_engine.pydantic_ai_system.tools.call_persona import call_persona_toolset
 from ai_engine.pydantic_ai_system.tools.nudge_gate import NudgeGate
 from ai_engine.pydantic_ai_system.tools.registry import ToolRegistry, normalize_key
+from ai_engine.pydantic_ai_system.tools.relevance import hidden_matches, hint_text
 from ai_engine.pydantic_ai_system.tools.setup_tools import setup_toolset
 from ai_engine.pydantic_ai_system.tools.toolset_builder import ToolsetBuilder
 from ai_engine.pydantic_ai_system.usage_reader import UsageReader, estimate_tokens
@@ -239,6 +240,18 @@ class PydanticAISystem:
                     PromptSection(kind="plan_tools", priority=80, stable=False,
                                   text=plan_tools_section(plan_catalog)),
                 ))
+            # The loaded set is held per topic (cache), so a later question
+            # can need a tool that is only reachable through search_tools —
+            # and a model that never searches answers "I have no tool for
+            # that" (found live 2026-11-01). Name the best hidden matches in
+            # a volatile line at the end; the tool list itself never changes.
+            if catalog and job.resume is None:
+                hidden = hidden_matches(catalog, loaded.tool_ids, job.message or "")
+                if hidden:
+                    plan = dc_replace(plan, instructions=plan.instructions + (
+                        PromptSection(kind="tool_hint", priority=84, stable=False,
+                                      text=hint_text(hidden)),
+                    ))
 
             # ── Layer 6 (W6 + preflight): the approved plan rides PROTECTED;
             # a runbook step's previous output rides clipped (turn_rules).

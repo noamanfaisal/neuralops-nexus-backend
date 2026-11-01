@@ -677,6 +677,21 @@ hand-over note; project-level holder sees no picker and mints for themself).
   the token opens api.githubcopilot.com/mcp/: 46 tools, 28 read-only.
   Next vendor apps: Atlassian, then Google Drive (Google's hosted Drive MCP
   is a Developer Preview — see the 2026-10-31 notes).
+- **Per-TOOL selection on a persona (owner, 2026-11-01: "attach full mcp
+  or get list of tools and select some tools").** The ENGINE already does
+  it: persona.tool_levels takes "mcp:<server id>/<tool>": "off" (the tool
+  leaves the catalog entirely — never offered, never searchable) or
+  "auto"/"ask" per tool. The WEB persona dialog (tool-levels-section.tsx)
+  only offers a level per whole SERVER today. To build: expand a server row
+  into its stored tools (name + read/write badge) with Auto/Ask/Off each,
+  plus "only these" shortcuts (all reads, none). Small; frontend only.
+- **Tool relevance BUILT 2026-11-01.** First reply of a topic with no router
+  seat loads the tools that best fit the message (keyword match on tool
+  names + one-liners, reads first; natives in front) instead of the first
+  12 in catalog order; later turns keep the held set (cache) but name the
+  best hidden matches in a prompt line ("load them with search_tools").
+  relevance.py; tests/test_tool_relevance.py. Live trigger: @ma "show the
+  last 5 commits" → list_commits was hidden.
 - **Per-USER connections (owner, 2026-11-01: "yes thats good" — to
   discuss before building).** Today a token belongs to the MCP server ROW
   in a project: whoever pressed Connect, every persona in that project acts
