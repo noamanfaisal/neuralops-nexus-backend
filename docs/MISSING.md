@@ -1561,6 +1561,34 @@ lesson 14) and rebuild the image — fold into the next image build.
   we will make our own docker" (our own storage image; elestio/minio was the
   third-party alternative considered and not taken). Uploading from chat
   (upload_url) needs S3_PUBLIC_ENDPOINT — off on node3 by design (private).
+  **RULED 2026-11-01 21:51 — LATER: THE COMPLETE DATA PIPELINE IN ONE
+  DOCKER IMAGE (owner: "there should be a complete package for mcp for
+  MINIO (or S3) and mcp for DuckDB … and offcourse Minio + DuckDB" … "we
+  will push this whole pipeline in one docker … add it in missing.md we will
+  do it later").** Today's pod is a minimal combined server (5 tools:
+  list_files, upload_url, describe_file, run_sql, export_result) on a
+  separate SeaweedFS container. The target: ONE image of ours holding
+  (1) the S3 storage (our own build — "later we will make our own docker";
+  SeaweedFS until then), (2) a STORAGE MCP and (3) a DUCKDB MCP, both ours,
+  as two tiles a persona can attach separately or together (MinIO + DuckDB),
+  one process supervisor, one token per pod, one volume.
+  STORAGE MCP tools — reads (silent): list buckets, list objects, object
+  info/size/date, preview first lines, presigned DOWNLOAD link; writes
+  (approval card): create bucket, presigned UPLOAD link, copy, move/rename,
+  write a small text object; deletes (card, separate switch): delete
+  object, delete bucket.
+  DUCKDB MCP tools — reads (silent): query (SELECT), list tables, describe
+  a table or file, profile a file (rows, nulls, min/max), CSV/Parquet/JSON/
+  Excel; writes (card): create table from a file, save a cleaned table,
+  export a result to a new file, drop table. A PERSISTENT DuckDB database
+  kept in the storage (tables survive restarts; joins across files).
+  Rules: every tool carries an honest readOnlyHint (reads silent, writes
+  ask); DuckDB locked to the storage only (no local filesystem, settings
+  frozen — enable_external_access/disabled_filesystems/lock_configuration);
+  results capped; HTTP transport only. Considered and NOT taken: assembling
+  txn2/mcp-s3 + MotherDuck's mcp-server-motherduck (+ MinIO's AIStor MCP) —
+  unknown read/write hints (every query would ask) and three outside
+  projects to track.
   LATER IF WANTED: per-project buckets/tokens,
   parquet auto-conversion of hot CSVs, a size-capped upload road from the
   Files pane.
