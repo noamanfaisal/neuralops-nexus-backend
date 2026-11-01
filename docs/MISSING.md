@@ -991,6 +991,33 @@ lesson 14) and rebuild the image — fold into the next image build.
   wrap the Tool Server (`@drawio/mcp`, honours DRAWIO_BASE_URL) with
   mcp-proxy like codegraph. Mermaid in chat stays for quick inline pictures.
   Catalog tile: after (2), so the tile never sends people to diagrams.net.
+  **PARKED 2026-10-31 (owner: "no its not working, leave it … we will
+  discuss it later").** Three live tries the same evening, testpersona
+  (plan-first), "draw a sequence diagram … using draw.io":
+  1. Plan said "render as Mermaid", invented tool names → the plan turn had
+     NO tool list. FIXED 44075c7 (plan turns list the real tools).
+  2. Plan named mydraw_io__create_diagram, run drew Mermaid by hand → the
+     tool was hidden behind tool search (outside the topic's set) and the
+     guessed "Respond with a Mermaid diagram" contract beat the plan. FIXED
+     55ffd3f (approved plans load their tools; a guessed format never
+     overrules an approved plan).
+  3. create_diagram WAS called (drawio-mcp log: tools/call 200), but the
+     reply only SAID "I've created an interactive sequence diagram" — no
+     link, no picture. The tool's own description says it "creates and
+     DISPLAYS" the diagram, so the model assumes the user sees it; the
+     "open in draw.io" link in the result never reached the reply. OPEN.
+  Also found on the way: the mcp 2.x library spells readOnlyHint as
+  read_only_hint; we read only the old name, so EVERY MCP tool was stored
+  unknown and asked first. FIXED 44075c7 (stored lists need one "Refresh
+  tools"). Code Graph's tools carry no read hint at all, so each
+  find_code asks (10 cards in one reply) — per-tool level "auto" or a
+  per-server "treat as read" setting is worth discussing.
+  TO DISCUSS: fix (3) properly = the LATER (2) design above — the ENGINE
+  lifts the diagram out of the create_diagram result (XML/Mermaid + link)
+  and attaches it to the reply itself (a link chip now; a `.drawio` file +
+  our own editor later), so it never depends on the model copying a link.
+  Cheaper stop-gap: a per-server note in the prompt ("this client cannot
+  display diagrams — always give the user the link from the result").
 
 - **SECURITY — LAUNCH BLOCKER (found 2026-11-01 live): the shell capability
   is NOT confined to the project folder.** The harness Shell checks only the
