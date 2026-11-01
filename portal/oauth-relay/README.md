@@ -26,11 +26,13 @@ the vendor apps below exist.
 
 Serve `index.html` at exactly:
 
-    https://neuralopsnexus.ai/oauth/relay
+    https://auth.neuralopsnexus.ai/oauth/relay
 
-(owner, 2026-10-31 — the `NEURALOPS_OAUTH_RELAY_URL` default; its own setting,
-so the claim page can stay on the portal host; e.g. copy to
-`<webroot>/oauth/relay/index.html`). It must answer a
+(owner, 2026-11-01 — the `NEURALOPS_OAUTH_RELAY_URL` default). It lives in its
+own repo, `mapax-io/neuralops-oauth-relay`, deployed as its own Vercel project
+(`oauth/relay/index.html` + a `vercel.json` rewrite for `/oauth/relay`), with
+the subdomain `auth` as a CNAME at Hostinger DNS. The main website
+(`neuralopsnexus.ai`, another Vercel project) never carries it. It must answer a
 plain anonymous GET. Quick check: open
 `…/oauth/relay?state=x` in a browser → "This connection could not be
 completed" in words, not a 404.
@@ -43,7 +45,7 @@ Supabase → Edge Functions → Deploy new function → name EXACTLY
 
 ### 2. Register the three vendor apps
 
-Use the ONE redirect URI everywhere: `https://neuralopsnexus.ai/oauth/relay`
+Use the ONE redirect URI everywhere: `https://auth.neuralopsnexus.ai/oauth/relay`
 (the function's `DEFAULT_RELAY`; if you ever move it, set `PORTAL_RELAY_URL` on
 the function AND `NEURALOPS_OAUTH_RELAY_URL` on every install to the same value).
 

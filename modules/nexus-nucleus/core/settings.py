@@ -209,14 +209,15 @@ NEURALOPS_PORTAL_URL = os.getenv(
     "NEURALOPS_PORTAL_URL",
     "https://neuralops-nexus-auth.mapax.io",
 )
-# The ONE redirect URI every "Connect with NeuralOps" vendor app knows (owner,
-# 2026-10-31: "call back will be with neuralopsnexus.ai"). Its own setting so
-# the relay can live on the product domain while the claim page stays on the
-# portal. MUST equal the oauth-exchange function's PORTAL_RELAY_URL and the
-# callback registered with each vendor app, or every exchange is refused.
+# The ONE redirect URI every "Connect with NeuralOps" vendor app knows. The
+# relay is its own Vercel project (repo mapax-io/neuralops-oauth-relay) on its
+# own subdomain, so the main website (neuralopsnexus.ai, another Vercel
+# project) never has to carry it (owner, 2026-11-01). MUST equal the
+# oauth-exchange function's PORTAL_RELAY_URL and the callback registered with
+# each vendor app, or every exchange is refused.
 NEURALOPS_OAUTH_RELAY_URL = os.getenv(
     "NEURALOPS_OAUTH_RELAY_URL",
-    "https://neuralopsnexus.ai/oauth/relay",
+    "https://auth.neuralopsnexus.ai/oauth/relay",
 ).rstrip("/")
 # WP4 road 2b: the portal's oauth-exchange function — the famous providers
 # demand the vendor app's client secret at the token exchange, so installs

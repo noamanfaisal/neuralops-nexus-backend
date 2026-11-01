@@ -28,7 +28,7 @@
 // against OUR fixed redirect_uri. The function never accepts a token
 // endpoint or redirect_uri from the caller.
 
-const DEFAULT_RELAY = "https://neuralopsnexus.ai/oauth/relay";
+const DEFAULT_RELAY = "https://auth.neuralopsnexus.ai/oauth/relay";
 
 const PROVIDERS: Record<string, { token: string; idEnv: string; secretEnv: string; json: boolean }> = {
   // json: Atlassian's token endpoint takes a JSON body; the others take form.
