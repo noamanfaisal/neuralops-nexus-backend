@@ -156,11 +156,17 @@ class OAuthRoadsApiTests(MentionRightFixture):
             redirect_mode="portal_relay",
         )
         from urllib.parse import parse_qs, unquote, urlsplit
-        with self.settings(NEURALOPS_PORTAL_URL="https://neuralopsnexus.ai",
+        # The relay has its OWN setting (owner, 2026-10-31: the callback is
+        # neuralopsnexus.ai/oauth/relay) -- the portal address (claim page)
+        # no longer decides it.
+        with self.settings(NEURALOPS_PORTAL_URL="https://portal.elsewhere.test",
+                           NEURALOPS_OAUTH_RELAY_URL="https://neuralopsnexus.ai/oauth/relay",
                            NEURALOPS_SERVER_URL="http://customer-box.test"):
             url = oauth_client.build_authorize_url(server, frontend_origin="http://localhost:3000")
         qs = parse_qs(urlsplit(url).query)
         self.assertEqual(qs["redirect_uri"], ["https://neuralopsnexus.ai/oauth/relay"])
+        from django.conf import settings as live
+        self.assertEqual(live.NEURALOPS_OAUTH_RELAY_URL, "https://neuralopsnexus.ai/oauth/relay")
         # The relay reads server_url WITHOUT the signing key (django signing is
         # signed, not encrypted) -- so it must be IN the state, and the signed
         # load must agree with the plain base64 read.

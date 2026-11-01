@@ -17,7 +17,8 @@ Step 6 (docs/NUCLEUS-REVAMP.md, ruling 8) added the three roads:
 
 2. THE PORTAL RELAY (the famous three -- GitHub, Google Drive, Atlassian):
    oauth_config.redirect_mode = "portal_relay" sends the provider's bounce to
-   {NEURALOPS_PORTAL_URL}/oauth/relay instead of this install. The signed
+   NEURALOPS_OAUTH_RELAY_URL (neuralopsnexus.ai/oauth/relay) instead of this
+   install. The signed
    state carries server_url; django signing is SIGNED, NOT ENCRYPTED, so the
    relay can base64-read server_url WITHOUT the key and bounce the browser
    on to {server_url}/api/v1/mcp-servers/oauth/callback/?code&state -- where
@@ -49,9 +50,9 @@ DISCOVERY_TIMEOUT = 15
 def _redirect_uri(cfg: dict | None = None) -> str:
     cfg = cfg or {}
     if cfg.get("redirect_mode") == "portal_relay":
-        # Road 2: the provider only ever knows the portal's ONE address.
-        portal = getattr(settings, "NEURALOPS_PORTAL_URL", "").rstrip("/")
-        return f"{portal}/oauth/relay"
+        # Road 2: the provider only ever knows the relay's ONE address
+        # (NEURALOPS_OAUTH_RELAY_URL, https://neuralopsnexus.ai/oauth/relay).
+        return getattr(settings, "NEURALOPS_OAUTH_RELAY_URL", "").rstrip("/")
     base = getattr(settings, "NEURALOPS_SERVER_URL", "").rstrip("/")
     # intelligence_router is mounted at "/" (see core/urls.py) -- the actual
     # path is /api/v1/mcp-servers/oauth/callback/. Must match the authorize

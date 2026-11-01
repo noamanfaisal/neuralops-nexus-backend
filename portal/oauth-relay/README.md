@@ -26,10 +26,11 @@ the vendor apps below exist.
 
 Serve `index.html` at exactly:
 
-    https://neuralops-nexus-auth.mapax.io/oauth/relay
+    https://neuralopsnexus.ai/oauth/relay
 
-(the `NEURALOPS_PORTAL_URL` default + `/oauth/relay` — same host as the claim
-page; e.g. copy to `<webroot>/oauth/relay/index.html`). It must answer a
+(owner, 2026-10-31 — the `NEURALOPS_OAUTH_RELAY_URL` default; its own setting,
+so the claim page can stay on the portal host; e.g. copy to
+`<webroot>/oauth/relay/index.html`). It must answer a
 plain anonymous GET. Quick check: open
 `…/oauth/relay?state=x` in a browser → "This connection could not be
 completed" in words, not a 404.
@@ -42,7 +43,9 @@ Supabase → Edge Functions → Deploy new function → name EXACTLY
 
 ### 2. Register the three vendor apps
 
-Use the ONE redirect URI everywhere: `https://neuralops-nexus-auth.mapax.io/oauth/relay`
+Use the ONE redirect URI everywhere: `https://neuralopsnexus.ai/oauth/relay`
+(the function's `DEFAULT_RELAY`; if you ever move it, set `PORTAL_RELAY_URL` on
+the function AND `NEURALOPS_OAUTH_RELAY_URL` on every install to the same value).
 
 | Provider | Where | Settings |
 |---|---|---|
