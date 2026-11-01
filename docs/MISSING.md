@@ -1553,7 +1553,15 @@ lesson 14) and rebuild the image — fold into the next image build.
   (Data Pod)" tile (Data category, static_secrets — house glyph, no brand
   mark). server.py syntax-checked; the pod's own smoke run is the owner's
   deploy (README: cp .env.example .env → compose up → add server → Refresh
-  tools → attach to personas). LATER IF WANTED: per-project buckets/tokens,
+  tools → attach to personas). **FIRST REAL DEPLOY 2026-11-01 (node3):**
+  MinIO's free images are gone (retired upstream) → storage is SeaweedFS
+  4.06; mcp<2 + duckdb<2 pinned; make_env.py writes the secrets unseen.
+  Verified: 401 without token, 1M-row CSV GROUP BY in ~0.6 s, engine dials
+  http://datapod:8900/mcp. Owner (21:35): keep SeaweedFS for now — "later
+  we will make our own docker" (our own storage image; elestio/minio was the
+  third-party alternative considered and not taken). Uploading from chat
+  (upload_url) needs S3_PUBLIC_ENDPOINT — off on node3 by design (private).
+  LATER IF WANTED: per-project buckets/tokens,
   parquet auto-conversion of hot CSVs, a size-capped upload road from the
   Files pane.
 
