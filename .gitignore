@@ -305,3 +305,17 @@ modules/nexus-ai/tests/REPORT-live.md
 # any other directory named "projects" that might exist elsewhere.
 /projects/
 *.lua
+.backups/devdb-before-flush-2026-10-30b.sql.gz
+.backups/devdb-before-wipe-2026-10-30.sql.gz
+.backups/projects-dev-before-wipe-2026-10-30.tgz
+# The whole backups folder: database dumps, project archives and one-off
+# restore scripts never belong in git (dumps hold encrypted keys and data).
+.backups/
+# Throwaway live-check scripts written while testing on a dev box
+# (".<name>_probe.py", ".<name>_check.py" and their notes) — never shipped.
+.*_probe.py
+.*_check.py
+.*_check[0-9].py
+.*_refresh.py
+.probe*.py
+.ai-log-check.md
