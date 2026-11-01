@@ -968,6 +968,30 @@ lesson 14) and rebuild the image — fold into the next image build.
   OPEN for the owner: Plane vs Vikunja; launch vs after (≈half a day);
   default install vs optional tile (Claude: optional, like the Data Pod).
 
+- **draw.io diagrams — FIRST DEPLOY 2026-10-31 (owner: "lets try draw.io
+  mcp").** `drawio/docker-compose.yaml`: the official App Server
+  (jgraph/drawio-mcp, Apache-2.0, digest-pinned), container `drawio-mcp` on
+  neuralops-network, no published port, ALLOWED_HOSTS=drawio-mcp. Add in the
+  app as HTTP `http://drawio-mcp:3001/mcp`, auth none. Tools (all
+  readOnlyHint): create_diagram (draw.io XML or Mermaid), search_shapes,
+  get_drawio_reference. Probed from the engine container: lists 3 tools;
+  create_diagram returns the source plus an "open in draw.io" link (460
+  chars for a 4-step sequence; compressed). Our engine declares no MCP-App
+  UI, so the link is the only way the user sees the diagram.
+  KNOWN LIMITS: (a) the link is HARDCODED to https://app.diagrams.net (the
+  diagram travels in the #fragment, never sent to a server, but the editor
+  page loads from diagrams.net); (b) the MODEL has to copy the link — fine
+  for small diagrams, risky for big ones (draw.io's own notes: a model's copy
+  broke after 447 chars).
+  LATER — "draw.io self-hosted": (1) run the editor ourselves
+  (jgraph/drawio, Apache-2.0) behind the web app; (2) the ENGINE, not the
+  model, takes the diagram from the tool result and saves it as a
+  `.drawio` file in the project (the File viewer gets an "Open in draw.io"
+  button pointing at OUR editor) — no link copying, no diagrams.net; (3) or
+  wrap the Tool Server (`@drawio/mcp`, honours DRAWIO_BASE_URL) with
+  mcp-proxy like codegraph. Mermaid in chat stays for quick inline pictures.
+  Catalog tile: after (2), so the tile never sends people to diagrams.net.
+
 - **SECURITY — LAUNCH BLOCKER (found 2026-11-01 live): the shell capability
   is NOT confined to the project folder.** The harness Shell checks only the
   COMMAND NAME against allowed_commands, never the paths in its arguments,

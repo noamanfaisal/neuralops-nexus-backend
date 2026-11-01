@@ -1,0 +1,38 @@
+# draw.io diagrams for NeuralOps personas — the official draw.io MCP server
+# (jgraph/drawio-mcp, Apache-2.0), reachable only on NeuralOps' internal
+# network. No published port, no secrets.
+#
+#   docker compose -p drawio up -d
+#
+# In NeuralOps: /add-mcp → Add server → transport HTTP,
+#   URL  http://drawio-mcp:3001/mcp   (auth: none — internal only)
+#
+# Tools: create_diagram (draw.io XML or Mermaid), get_drawio_reference,
+# search_shapes. Our engine doesn't render MCP-App UIs, so every
+# create_diagram result carries an "open in draw.io" link instead.
+#
+# KNOW BEFORE USING (2026-10-31):
+#  - That link always points at https://app.diagrams.net (hardcoded in this
+#    image). The diagram rides in the URL #fragment, which browsers never send
+#    to the server — but the editor page itself is loaded from diagrams.net.
+#    Fully self-hosted editor: see docs/MISSING.md ("draw.io self-hosted").
+#  - search_shapes may call icons.diagrams.net for icons (DRAWIO_ICON_SERVICE_URL
+#    overrides; empty string turns it off).
+
+services:
+  drawio-mcp:
+    # Pinned: the :latest of 2026-10-31. Bump deliberately.
+    image: jgraph/drawio-mcp@sha256:499d786506ff44698aa2a776684149ca70f46c18e5e505111f714cdc5b5d6bf4
+    container_name: drawio-mcp
+    environment:
+      PORT: "3001"
+      LISTEN: 0.0.0.0
+      # Host-header check: only the internal name answers.
+      ALLOWED_HOSTS: drawio-mcp
+    networks: [neuralops]
+    restart: unless-stopped
+
+networks:
+  neuralops:
+    external: true
+    name: ${NEURALOPS_NETWORK:-neuralops-network}
