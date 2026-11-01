@@ -285,6 +285,50 @@ class OAuthRoadsApiTests(MentionRightFixture):
         server.save()
         self.assertFalse(oauth_client.refresh_if_needed(server))
 
+    def test_a_successful_connect_fetches_the_tool_list_at_once(self):
+        """Found live 2026-11-01: a Connect-with-NeuralOps server is saved
+        BEFORE it has a token, so its save-time tool fetch got nothing and the
+        persona said "I don't have a GitHub integration". The callback now
+        fetches the list with the fresh token; a failed fetch never fails the
+        sign-in."""
+        server = self._server(
+            client_id="Ov23liTRtfeWiJ03y4Gp", authorize_endpoint="https://github.com/login/oauth/authorize",
+            token_endpoint="https://github.com/login/oauth/access_token",
+            redirect_mode="portal_relay", exchange_mode="portal",
+            exchange_provider="github", token_env_var="GITHUB_TOKEN",
+        )
+        self.assertEqual(server.tools or [], [])
+
+        def state():
+            return signing.dumps(
+                {"server_id": str(server.id), "frontend_origin": "http://localhost:3000",
+                 "code_verifier": "v", "server_url": "http://x"},
+                salt=oauth_client._SIGNING_SALT)
+
+        listed = [{"name": "get_me", "one_line": "Who am I", "read_only": True},
+                  {"name": "create_issue", "one_line": "Open an issue", "read_only": False}]
+        with self.settings(SUPABASE_OAUTH_EXCHANGE_URL="https://portal.test/fn"), \
+             patch("intelligence.oauth_client.httpx.post") as post, \
+             patch("chat.nexus_ai.NexusAIClient.list_mcp_tools", return_value=(True, listed)) as dial:
+            post.return_value = FakeResp(200, {"access_token": "gho_live", "refresh_token": "ghr", "expires_in": 28800})
+            r = self.client.get("/api/v1/mcp-servers/oauth/callback/", {"code": "c", "state": state()})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Connected", r.content)
+        self.assertEqual(dial.call_args.args, ("https://modern.example/mcp", "gho_live"))  # the NEW token
+        server.refresh_from_db()
+        self.assertEqual([t["name"] for t in server.tools], ["get_me", "create_issue"])
+        self.assertEqual(server.tools[0]["read_only"], True)
+
+        # a dead MCP server: the sign-in still succeeds, the list stays as it was
+        with self.settings(SUPABASE_OAUTH_EXCHANGE_URL="https://portal.test/fn"), \
+             patch("intelligence.oauth_client.httpx.post") as post, \
+             patch("chat.nexus_ai.NexusAIClient.list_mcp_tools", return_value=(False, "unreachable")):
+            post.return_value = FakeResp(200, {"access_token": "gho_2", "refresh_token": "ghr2", "expires_in": 28800})
+            r = self.client.get("/api/v1/mcp-servers/oauth/callback/", {"code": "c2", "state": state()})
+        self.assertIn(b"Connected", r.content)
+        server.refresh_from_db()
+        self.assertEqual(len(server.tools), 2)
+
     def test_the_github_tile_carries_the_vendor_app_id(self):
         r = self.call("get", "/api/v1/mcp-catalog/", self.sara)
         github = next(e for e in r.json() if e["id"] == "github")

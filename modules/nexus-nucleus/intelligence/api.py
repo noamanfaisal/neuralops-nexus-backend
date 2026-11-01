@@ -546,6 +546,20 @@ def mcp_oauth_callback(request, code: str = None, state: str = None, error: str 
         result = oauth_client.complete_callback(code, state)
     except (signing.BadSignature, ValueError) as exc:
         return html(False, None, err=str(exc))
+    # The tool list is fetched at save time, but an OAuth server has NO token
+    # then -- so a fresh "Connect with NeuralOps" server stayed toolless and
+    # its personas saw nothing to call (found live 2026-11-01, GitHub: "I
+    # don't have a GitHub integration"). Fetch it now that the token exists;
+    # best-effort, a slow server never fails the sign-in.
+    from nucleus.models import MCPServer
+    server = MCPServer.objects.filter(id=result["server_id"]).first()
+    if server is not None:
+        try:
+            ok, reason = _refresh_server_tools(server)
+            if not ok:
+                logger.info("[mcp] tool list not fetched after connect for %s: %s", server.name, reason)
+        except Exception:  # noqa: BLE001 -- never fail the sign-in over the list
+            logger.exception("[mcp] tool refresh after connect failed for %s", server.name)
     return html(True, result["frontend_origin"], server_id=result["server_id"])
 
 
