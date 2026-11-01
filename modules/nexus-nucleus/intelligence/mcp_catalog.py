@@ -118,14 +118,14 @@ MCP_CATALOG = [
         # minio to handle large csv".
         "id": "data-pod",
         "title": "Large CSV analytics (Data Pod)",
-        "description": "Your own DuckDB + MinIO box for files too big for chat — personas run SQL over gigabyte CSVs and only capped results travel.",
+        "description": "Your own DuckDB + S3 storage box for files too big for chat — personas run SQL over gigabyte CSVs and only capped results travel.",
         "category": "Data",
         "server_type": "hosted",
         "transport": "http",
         "command": None,
         "url": "http://{your-data-pod-address}:8900/mcp",
         "auth_type": "static_secrets",
-        "needs": ["A deployed data pod (the repo's data-pod/ — one docker compose on a RunPod or any box) and its DATAPOD_TOKEN"],
+        "needs": ["A deployed data pod (the repo's data-pod/ — python make_env.py, then one docker compose, on this box as http://datapod:8900/mcp or on a RunPod) and its DATAPOD_TOKEN as the secret"],
         "docs": "https://github.com/mapax-io/neuralops-nexus/tree/main/data-pod",
     },
     {

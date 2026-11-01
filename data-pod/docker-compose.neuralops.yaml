@@ -11,10 +11,8 @@
 #
 #   DATAPOD_PORT=127.0.0.1:8900
 #   MINIO_PORT=127.0.0.1:9000
-#   MINIO_CONSOLE_PORT=127.0.0.1:9001
 #
-# (reach the MinIO console through an SSH tunnel: ssh -L 9001:127.0.0.1:9001
-# <box>, then http://localhost:9001). On a RunPod or a separate VPS, use the
+# (make_env.py writes exactly that). On a RunPod or a separate VPS, use the
 # plain docker-compose.yaml instead — see README.
 
 services:

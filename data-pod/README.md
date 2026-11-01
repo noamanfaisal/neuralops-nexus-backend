@@ -1,4 +1,4 @@
-# NeuralOps Data Pod — large CSVs, DuckDB + MinIO
+# NeuralOps Data Pod — large CSVs, DuckDB + S3 storage
 
 One box that holds a team's BIG files (CSVs/parquet too large for chat or
 the project folder) and answers SQL about them. NeuralOps attaches it like
@@ -6,29 +6,50 @@ any external MCP server; personas then query gigabyte files and only capped
 RESULTS ever travel — never the file.
 
 ```
- person ──presigned PUT──►  MinIO (S3)  ◄──s3:// reads──  DuckDB
-                                 ▲                           ▲
-                                 └──────── data pod (MCP, bearer) ◄── NeuralOps
+ person ──presigned PUT──►  SeaweedFS (S3)  ◄──s3:// reads──  DuckDB
+                                 ▲                              ▲
+                                 └────────── data pod (MCP, bearer) ◄── NeuralOps
 ```
 
-## Deploy (RunPod or any docker host)
+Storage is **SeaweedFS** (Apache-2.0, S3-compatible). It replaced MinIO on
+2026-11-01: MinIO retired its free edition and its images are no longer
+published. The pod talks to it exactly as it did to MinIO.
+
+Verified live on node3 (2026-11-01): a 1,000,000-row / 34 MB CSV is
+described in ~1 s and a GROUP BY over all of it answers in ~0.6 s; requests
+without the bearer token get 401.
+
+## Deploy on the NeuralOps box itself (nothing public)
 
 ```bash
 cd data-pod
-cp .env.example .env        # set DATAPOD_TOKEN + S3_SECRET (+ S3_PUBLIC_ENDPOINT)
+python make_env.py            # .env with strong random secrets, never printed
+docker compose -p datapod -f docker-compose.yaml -f docker-compose.neuralops.yaml up -d --build
+```
+
+The pod joins NeuralOps' docker network; its ports stay on 127.0.0.1.
+In NeuralOps the URL is `http://datapod:8900/mcp`.
+
+## Deploy on RunPod or any other docker host
+
+```bash
+cd data-pod
+python make_env.py            # then edit .env: drop the 127.0.0.1: prefixes,
+                              # set S3_PUBLIC_ENDPOINT if you want upload links
 docker compose up -d --build
 ```
 
-On RunPod: expose ports 8900 (the MCP server) and 9000 (MinIO, only if you
-want presigned upload/download links; put its public proxy URL in
-`S3_PUBLIC_ENDPOINT`). 9001 is MinIO's web console for dragging files in by
-hand — expose at your own taste.
+Expose port 8900 (the MCP server), and the S3 port (MINIO_PORT, default
+9000) only if you want presigned upload/download links — put its public URL
+in `S3_PUBLIC_ENDPOINT`.
 
 ## Attach to NeuralOps
 
-Intelligence → MCP tab → **Add server**:
-- transport **http**, URL `http://<pod address>:8900/mcp`
-- auth **static secrets**, client_secret = your `DATAPOD_TOKEN`
+`/add-mcp` → **Add server**:
+- transport **HTTP**, URL `http://datapod:8900/mcp` (same box) or
+  `http(s)://<pod address>:8900/mcp`
+- auth **static secrets**, secret = your `DATAPOD_TOKEN`
+  (read it on the box with `grep DATAPOD_TOKEN .env` — never paste it in chat)
 - Refresh tools, attach to the personas that should see the data.
 
 ## The tools
@@ -47,9 +68,9 @@ an approval card first — the same rule as every other tool.
 ## Getting big files IN
 
 - `upload_url` from chat → the persona hands the person a curl line; the
-  file goes straight to the pod, never through the AI.
-- Or the MinIO console (port 9001) — drag and drop.
-- Or any S3 client against port 9000 with the pod's key/secret.
+  file goes straight to the pod, never through the AI (needs
+  `S3_PUBLIC_ENDPOINT`).
+- Or any S3 client against the S3 port with the pod's key/secret.
 
 ## Honest limits
 

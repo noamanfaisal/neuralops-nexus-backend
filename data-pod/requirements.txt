@@ -1,6 +1,7 @@
-# The data pod's whole world (server.py). Pin on first real deploy if a
-# provider breaks something; these track the official SDKs.
-mcp>=1.2
-duckdb>=1.1
+# The data pod's whole world (server.py). Majors pinned on the first real
+# deploy (2026-11-01): mcp 2.x renamed FastMCP (server.py is 1.x code) and
+# duckdb 2.0 is a new major — upgrade both deliberately, with a smoke run.
+mcp>=1.2,<2
+duckdb>=1.1,<2
 boto3>=1.34
 uvicorn>=0.30
