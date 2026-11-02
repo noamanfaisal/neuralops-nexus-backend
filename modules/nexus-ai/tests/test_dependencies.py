@@ -13,6 +13,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 MODULE_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -72,5 +74,10 @@ def test_t16_nothing_imports_the_legacy_module():
 def test_t16_fastapi_app_init_is_empty_of_imports():
     """T16 — fastapi_app/__init__.py stays import-free.
     ai_engine pulls fastapi_app.contracts in, and anything imported in that
-    __init__ would come with it — one import there and rule 1 silently breaks."""
-    assert _imports(MODULE_ROOT / "fastapi_app" / "__init__.py") == []
+    __init__ would come with it — one import there and rule 1 silently breaks.
+    A source rule: in the compiled release image there is no source to read
+    (the proof runs there skip it; the dev run checks it)."""
+    source = MODULE_ROOT / "fastapi_app" / "__init__.py"
+    if not source.exists():
+        pytest.skip("compiled image: no source to read")
+    assert _imports(source) == []

@@ -1,0 +1,32 @@
+# =============================================================================
+# neuralops/Dockerfile.cytest — the PROOF image for a compiled release.
+#
+# The release image (neuralops/Dockerfile) carries the app as native code
+# (Cython) with every test removed. This image adds ONLY the test files back
+# on top of it, so the three suites run against the COMPILED app — the proof
+# that compiling changed nothing. Never published; test-only.
+#
+#   docker build -f neuralops/Dockerfile.cytest --build-arg BASE=neuralops:1.1.0-cy -t neuralops:1.1.0-cytest .
+#   docker compose -p cytest -f neuralops/docker-compose.cytest.yaml \
+#     --env-file neuralops/infra.env --env-file neuralops/secrets.env run --rm engine-cytest
+#
+# Its own ignore file (Dockerfile.cytest.dockerignore) lets the test folders
+# into the build context, which the release .dockerignore keeps out.
+# =============================================================================
+ARG BASE=neuralops:local
+FROM ${BASE}
+USER root
+COPY modules/nexus-ai/tests /nexus/ai/tests
+COPY modules/nexus-ai/pytest.ini /nexus/ai/pytest.ini
+COPY modules/nexus-nucleus /tmp/nucleus-src
+# Only the nucleus test modules (tests.py / tests_*.py) go back in, each to
+# the app folder it came from — plus the package markers (__init__.py):
+# unittest's discovery only walks folders holding a SOURCE __init__.py, and
+# the release image keeps them as .pyc (found 2026-11-01: "Found 0 test(s)").
+# Django itself runs fine on __init__.pyc; this is the test finder only.
+RUN cd /tmp/nucleus-src && \
+    find . -type f \( -name 'tests.py' -o -name 'tests_*.py' -o -name '__init__.py' \) \
+      ! -path './.step0-removed/*' ! -path './docker/*' -exec cp --parents {} /nexus/nucleus/ \; && \
+    rm -rf /tmp/nucleus-src && \
+    chown -R nexus:nexus /nexus/ai/tests /nexus/ai/pytest.ini /nexus/nucleus
+USER nexus

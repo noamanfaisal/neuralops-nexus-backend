@@ -1,0 +1,42 @@
+# Proof runs for a compiled release image (neuralops/Dockerfile.cytest).
+# Joins the DEV stack's network and database exactly like the dev services
+# do (same env files, same interpolation) — run with the dev stack up:
+#
+#   docker compose -p cytest -f neuralops/docker-compose.cytest.yaml \
+#     --env-file neuralops/infra.env --env-file neuralops/secrets.env \
+#     run --rm engine-cytest          # or nucleus-cytest
+#
+# Never run both at once, and not while a dev suite runs: nucleus's test
+# database (test_<POSTGRES_DB>) is shared with the dev box's own test runs.
+services:
+  engine-cytest:
+    image: ${CYTEST_IMAGE:-neuralops:1.1.0-cytest}
+    command: ["nexus-ai-env", "python3", "-m", "pytest", "-q", "-p", "no:randomly"]
+    env_file:
+      - ./secrets.env
+    environment:
+      - NEXUS_VECTOR_DB_URL=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-dev:5432/nexus_vectors
+    networks:
+      - neuralops-network
+
+  nucleus-cytest:
+    image: ${CYTEST_IMAGE:-neuralops:1.1.0-cytest}
+    command: ["nucleus-env", "python", "manage.py", "test", "--noinput"]
+    env_file:
+      - ./secrets.env
+    environment:
+      - POSTGRES_HOST=postgres-dev
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - REDIS_URL=redis://redis-dev:6379/0
+      - NEXUS_AI_URL=http://nexus-ai-new:8000
+      - CENTRIFUGO_API_URL=http://centrifugo-dev:8000/api
+      - DEBUG=true
+    networks:
+      - neuralops-network
+
+networks:
+  neuralops-network:
+    external: true
+    name: neuralops-network

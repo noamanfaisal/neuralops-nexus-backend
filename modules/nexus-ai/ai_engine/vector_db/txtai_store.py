@@ -58,6 +58,21 @@ _WALK_LIMIT = 1_000_000  # v1: a project's rows fit in memory for a re-embed
 _BATCH = 64
 
 
+def _plain_function(call):
+    """A genuine Python function (types.FunctionType) that forwards to `call`.
+
+    txtai accepts an external transform only if it is exactly
+    types.FunctionType; anything else it treats as a factory and calls with
+    NO arguments. In the release image every module is native code (Cython),
+    where a `def` is a compiled function object, not FunctionType — found
+    2026-11-01: every vector operation failed with "transform() takes at
+    least 1 positional argument (0 given)". exec of this fixed text makes a
+    real Python function in both the dev (source) and the compiled build."""
+    namespace = {"_call": call}
+    exec("def transform(texts):\n    return _call(texts)\n", namespace)  # noqa: S102 — constant text
+    return namespace["transform"]
+
+
 def _slug(model_id: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", model_id.lower()).strip("_")[:20]
 
@@ -130,8 +145,7 @@ class TxtaiVectorStore(VectorStore):
     def _txtai_config(self, schema: str, embedder: Embedder) -> dict:
         # a plain FUNCTION, not a bound method — txtai treats any non-function
         # callable as a factory and calls it with no arguments
-        def transform(texts, _embedder=embedder):
-            return _embedder.embed(texts)
+        transform = _plain_function(embedder.embed)
 
         return {
             "method": "external", "transform": transform,

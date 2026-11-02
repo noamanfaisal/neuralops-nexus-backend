@@ -63,20 +63,27 @@ RUN pip install --no-cache-dir -r requirements.lock \
     --extra-index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir pytest==9.1.1 pytest-asyncio==1.4.0
 
-# ── Stage 2b: app code, compiled — the distribution half (1.0.0) ──────────
-# The release image CARRIES the code now (owner's plan, 2026-10-22): both
-# servers baked in, shipped as COMPILED BYTECODE — `compileall -b` then the
-# .py sources deleted — so the image holds no readable source while Django's
-# migration scan, celery's -A core import and uvicorn's module imports all
-# keep working exactly as from source. (Owner's first pick was Nuitka; the
-# bytecode road is the agreed working baseline — swapping THIS stage for a
-# Nuitka build is the only change needed if that experiment happens later.)
+# ── Stage 2b: app code, compiled to NATIVE code (Cython) ──────────────────
+# The release image CARRIES the code (owner's plan, 2026-10-22) and, since
+# 1.1.0, carries it as NATIVE MACHINE CODE (owner, 2026-11-01: the code goes
+# closed until launch traction — "make sure the docker contains no code but
+# compiled one"). Bytecode (.pyc, 1.0.0's road) is easy to decompile; Cython
+# turns each module into a .so extension BESIDE where its .py was, so Django's
+# discovery, celery's -A core and uvicorn's "module:app" strings keep working.
+# Cython over Nuitka (ruled 2026-11-01): per-file modules keep Django's
+# file-based discovery of migrations and management commands intact.
+# neuralops/cython_build.py says what stays bytecode and why (manage.py,
+# package __init__ files, migrations). The suites run against this image are
+# the proof nothing changed behaviour.
 # What never enters the image: tests, the .step0-removed/_attic parking lots,
-# dev docker files, pytest caches and reports. manage.py stays as source —
-# 20 boilerplate lines, and `manage.py migrate` is the documented setup step.
+# dev docker files, pytest caches and reports, internal notes.
 FROM python:3.13-slim-bookworm AS code-builder
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir cython==3.1.2 setuptools==80.9.0
 COPY modules/nexus-nucleus /code/nucleus
 COPY modules/nexus-ai /code/ai
+COPY neuralops/cython_build.py /build/cython_build.py
 # Second fence (the first is .dockerignore): runtime data must never ship.
 # Found 2026-11-01 in the published 1.0.0 image — the dev log (27 email
 # addresses) and an uploaded document. Only the avatar POOL is kept from
@@ -97,15 +104,26 @@ RUN rm -rf \
       /code/ai/.pytest_cache \
       /code/ai/.vscode && \
     rm -f /code/ai/test-output.txt /code/ai/pytest.ini \
-      /code/ai/requirements-dev.txt && \
+      /code/ai/requirements-dev.txt /code/ai/RULES.md && \
     find /code -type d -name "__pycache__" -exec rm -rf {} + && \
     find /code/nucleus -name "tests.py" -delete && \
     find /code/nucleus -name "tests_*.py" -delete
-# -b writes each module's .pyc BESIDE it (legacy layout — required once the
-# .py goes away); -q quiet; the find then strips every source file except
-# manage.py. A file that fails to compile fails the BUILD, loudly.
-RUN python -m compileall -b -q /code && \
+# Native code first (every module that compiles fails the build if it does
+# not), symbols stripped so the .so files carry no C-level names; then the few
+# files that stay bytecode: -b writes each .pyc BESIDE its source, the find
+# removes every remaining .py except manage.py.
+RUN python /build/cython_build.py /code/nucleus /code/ai && \
+    find /code -name "*.so" -exec strip --strip-unneeded {} + && \
+    python -m compileall -b -q /code && \
     find /code -name "*.py" ! -name "manage.py" -delete
+# The proof, at build time: no readable Python except manage.py, no C sources,
+# and native modules where the code is.
+RUN set -e; \
+    if [ -n "$(find /code -name '*.py' ! -name manage.py)" ]; then echo 'readable .py left in the image'; exit 1; fi; \
+    if [ -n "$(find /code -name '*.c')" ]; then echo 'C sources left in the image'; exit 1; fi; \
+    native="$(find /code -name '*.so' | wc -l)"; \
+    if [ "$native" -lt 100 ]; then echo "only $native native modules - compile step skipped?"; exit 1; fi; \
+    echo "native: $native  bytecode: $(find /code -name '*.pyc' | wc -l)"
 
 # ── Stage 3: centrifugo / nexus-transport binary ────────────────────────────
 # Same build this repo already uses for modules/nexus-transport/Dockerfile —

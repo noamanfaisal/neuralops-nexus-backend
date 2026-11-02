@@ -1,0 +1,30 @@
+# Build context for the proof image only (Dockerfile.cytest): the release
+# fences stay, but the test folders are let in.
+**/.git/
+**/__pycache__/
+**/*.pyc
+**/node_modules/
+**/.pytest_cache/
+docs/
+projects/
+portal/
+data/
+data-pod/
+codegraph/
+drawio/
+.backups/
+**/.env
+neuralops/secrets.env*
+neuralops/app.env
+neuralops/infra.env
+modules/neuralops-web-app/
+modules/nexus-nucleus/logs/
+modules/nexus-nucleus/media/
+modules/nexus-nucleus/.step0-removed/
+modules/nexus-ai/trial-c/
+**/.*_probe.py
+**/.*_check.py
+**/.*_check[0-9].py
+**/.*_refresh.py
+**/.probe*.py
+**/*.log
