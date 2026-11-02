@@ -77,6 +77,17 @@ RUN pip install --no-cache-dir -r requirements.lock \
 FROM python:3.13-slim-bookworm AS code-builder
 COPY modules/nexus-nucleus /code/nucleus
 COPY modules/nexus-ai /code/ai
+# Second fence (the first is .dockerignore): runtime data must never ship.
+# Found 2026-11-01 in the published 1.0.0 image — the dev log (27 email
+# addresses) and an uploaded document. Only the avatar POOL is kept from
+# media/, and the build FAILS if anything else is left there or in logs/.
+RUN find /code/nucleus/media -mindepth 1 -maxdepth 1 ! -name avatars -exec rm -rf {} + 2>/dev/null || true && \
+    find /code/nucleus/media/avatars -mindepth 1 -maxdepth 1 ! -name pool -exec rm -rf {} + 2>/dev/null || true && \
+    rm -rf /code/nucleus/logs /code/nucleus/debug_playground.py && \
+    find /code -name ".*" -type f -name "*.py" -delete && \
+    find /code -name ".vscode" -type d -exec rm -rf {} + && \
+    test -z "$(find /code/nucleus/media -type f ! -path '*/avatars/pool/*' 2>/dev/null)" || \
+      (echo "runtime data left in /code/nucleus/media" && exit 1)
 RUN rm -rf \
       /code/nucleus/.step0-removed \
       /code/nucleus/docker \

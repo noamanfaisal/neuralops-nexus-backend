@@ -37,6 +37,30 @@ modules/nexus-ai/.pytest_cache/
 modules/nexus-ai/trial-c/
 modules/neuralops-web-app/
 
+# Found 2026-11-01 IN THE PUBLISHED 1.0.0 IMAGE: the dev server's own log
+# (5 MB, 27 email addresses) and an uploaded document were baked in, because
+# `COPY modules/nexus-nucleus` takes the whole folder. Runtime data never
+# enters an image: logs, uploads, backups, local env files, scratch scripts.
+# The avatar POOL is an app asset and stays.
+modules/nexus-nucleus/logs/
+modules/nexus-nucleus/media/
+!modules/nexus-nucleus/media/avatars/
+modules/nexus-nucleus/media/avatars/*
+!modules/nexus-nucleus/media/avatars/pool/
+modules/nexus-nucleus/debug_playground.py
+.backups/
+**/.env
+data-pod/
+codegraph/
+drawio/
+**/.vscode/
+**/.*_probe.py
+**/.*_check.py
+**/.*_check[0-9].py
+**/.*_refresh.py
+**/.probe*.py
+**/.ai-log-check.md
+
 # Ignore other modules when building transport
 # modules/nexus-ai
 # modules/nexus-nucleus
