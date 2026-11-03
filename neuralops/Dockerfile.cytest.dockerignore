@@ -13,6 +13,7 @@ data-pod/
 codegraph/
 drawio/
 .backups/
+.trial/
 **/.env
 neuralops/secrets.env*
 neuralops/app.env

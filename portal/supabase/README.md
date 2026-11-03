@@ -104,5 +104,6 @@ screen finishes with you as owner. The second claim attempt answers 409.
 | `functions/device-claim/` | the page claims with the person's session; guess-brake: 5 wrong codes per account per 10 min → 429 (needs `claim_attempts` from schema.sql — missing table = brake off, claiming still works) | ON |
 | `functions/phone-home/` | installs report their one token total (open/close) | ON |
 | `functions/oauth-exchange/` | WP4's middle-server exchange: installs send OAuth codes; only this function holds the vendor secrets (see `portal/oauth-relay/README.md`) | ON |
+| `functions/claim-address/` | free random addresses `<xxxxxx>.on.neuralopsnexus.ai` for installs on a public-IP server (install.sh option 1): proves the IP answers on port 80, writes the A record through Hostinger, re-points it when the IP changes, releases it on uninstall. Secret: `HOSTINGER_API_TOKEN`. Tables: the claim-address part of `schema.sql`. Tests: `tests/claim-address.test.ts` (fake Hostinger, nothing real touched) | either — the installer and CLI send the public anon key; the per-server claim code is what guards update/release |
 | `../claim-page/index.html` | the browser page (sign in + type the code) — static, hosted anywhere | — |
 | `functions/claim-page/` | RETIRED — Supabase won't render HTML from functions; kept for history | — |

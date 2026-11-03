@@ -5,7 +5,10 @@
 # install folder). Reads the install's settings from neuralops/install.conf.
 #
 #   neuralops status      what is running, the address, the version
-#   neuralops address     the current address (tailscale: re-syncs if renamed)
+#   neuralops address     the current address (tailscale: re-syncs if renamed;
+#                         free address: moves it to this server's IP if that
+#                         changed — a timer runs `address --quiet` at boot
+#                         and every 6 hours)
 #   neuralops update [V]  back up, then upgrade to version V (default: latest)
 #   neuralops backup      database + secrets + project files into backups/
 #   neuralops restore D   put a backup folder back: database + project files
@@ -71,6 +74,34 @@ manage() {
     /opt/venv/nucleus-env/bin/python manage.py "$@"
 }
 server_url() { sed -n 's/^NEURALOPS_SERVER_URL=//p' "$NEURALOPS_DIR/neuralops/app.env"; }
+ADDRESS_URL="${NEURALOPS_ADDRESS_URL:-https://xgfsxikypxjhqlutiepw.supabase.co/functions/v1/claim-address}"
+ADDRESS_FILE="$NEURALOPS_DIR/neuralops/address.env"
+# Supabase's PUBLIC anon key (see install.sh) — grants nothing by itself.
+ADDRESS_KEY="${NEURALOPS_ADDRESS_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZnN4aWt5cHhqaHFsdXRpZXB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyNDg3MDcsImV4cCI6MjA5NzgyNDcwN30.2_OUNTHuKSeDJh6S-aUW16IqvDTmew8ZcFuKvFkt3Dk}"
+
+# address_call <action> → POSTs to the free-address service with this
+# server's name and private code; prints the answer's KEY=value lines, or the
+# service's reason on stderr and returns 1.
+address_call() {
+  local action="$1" host code body answer status reason
+  host="$(sed -n 's/^NEURALOPS_DOMAIN=//p' "$ADDRESS_FILE")"
+  code="$(sed -n 's/^NEURALOPS_ADDRESS_CODE=//p' "$ADDRESS_FILE")"
+  body="{\"action\":\"$action\",\"format\":\"env\",\"hostname\":\"$host\",\"claim_code\":\"$code\""
+  if [ "$action" = "update" ] && [ -n "${NEURALOPS_PUBLIC_IP:-}" ]; then
+    body="$body,\"ip\":\"$NEURALOPS_PUBLIC_IP\""
+  fi
+  body="$body}"
+  answer="$(curl -4 -sS --max-time 30 -X POST -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $ADDRESS_KEY" -d "$body" -w '\n%{http_code}' "$ADDRESS_URL" 2>&1 || true)"
+  status="${answer##*$'\n'}"
+  answer="${answer%$'\n'*}"
+  if [ "$status" != "200" ]; then
+    reason="$(printf '%s\n' "$answer" | sed -n 's/^ERROR=//p' | head -1)"
+    printf '%s\n' "${reason:-The address service could not be reached.}" >&2
+    return 1
+  fi
+  printf '%s\n' "$answer"
+}
 image()      { sed -n 's/^NEURALOPS_IMAGE=//p' "$NEURALOPS_DIR/neuralops/infra.env"; }
 
 wait_for() {  # wait_for "what" seconds command...
@@ -130,7 +161,29 @@ cmd_status() {
   fi
 }
 
+cmd_address_public() {
+  local quiet="${1:-}" answer newip host code
+  [ -f "$ADDRESS_FILE" ] || die "This server has no free address on record ($ADDRESS_FILE is missing)."
+  if ! answer="$(address_call update 2>&1)"; then die "Could not check the address: $answer"; fi
+  newip="$(printf '%s\n' "$answer" | sed -n 's/^NEURALOPS_PUBLIC_IP=//p')"
+  host="$(sed -n 's/^NEURALOPS_DOMAIN=//p' "$ADDRESS_FILE")"
+  if printf '%s\n' "$answer" | grep -qx 'CHANGED=yes'; then
+    code="$(sed -n 's/^NEURALOPS_ADDRESS_CODE=//p' "$ADDRESS_FILE")"
+    # Rewritten IN PLACE: the address timer runs as root, and a new file would
+    # leave the install's own user unable to read it.
+    printf 'NEURALOPS_DOMAIN=%s\nNEURALOPS_PUBLIC_IP=%s\nNEURALOPS_ADDRESS_CODE=%s\n' \
+      "$host" "$newip" "$code" > "$ADDRESS_FILE"
+    ok "This server's IP changed; https://$host now points at $newip (live within a few minutes)."
+  elif [ -z "$quiet" ]; then
+    say "Address: https://$host (points at $newip)"
+  fi
+}
+
 cmd_address() {
+  if [ "${NEURALOPS_MODE:-}" = "public" ]; then
+    cmd_address_public "${1:-}"
+    return
+  fi
   if [ "${NEURALOPS_MODE:-}" = "domain" ]; then
     say "Address: $(server_url)"
     return
@@ -281,6 +334,17 @@ cmd_uninstall() {
     if [ "${NEURALOPS_MODE:-}" = "tailscale" ] && command -v tailscale >/dev/null 2>&1; then
       $TS_CMD serve reset >/dev/null 2>&1 || true
     fi
+    if [ "${NEURALOPS_MODE:-}" = "public" ]; then
+      # Give the free address back, and stop the address check.
+      if [ -f "$ADDRESS_FILE" ] && address_call release >/dev/null 2>&1; then
+        ok "Address released."
+      fi
+      if command -v systemctl >/dev/null 2>&1; then
+        ${SUDO:-} systemctl disable --now neuralops-address.timer >/dev/null 2>&1 || true
+        ${SUDO:-} rm -f /etc/systemd/system/neuralops-address.timer /etc/systemd/system/neuralops-address.service 2>/dev/null || true
+        ${SUDO:-} systemctl daemon-reload >/dev/null 2>&1 || true
+      fi
+    fi
     rm -rf "$NEURALOPS_DIR" 2>/dev/null || ($SUDO rm -rf "$NEURALOPS_DIR")
     for d in /usr/local/bin /opt/homebrew/bin "$HOME/.local/bin" "$HOME/bin"; do
       if [ -f "$d/neuralops" ]; then
@@ -302,7 +366,7 @@ cmd_uninstall() {
 
 case "${1:-help}" in
   status)    cmd_status ;;
-  address)   cmd_address ;;
+  address)   shift; cmd_address "${1:-}" ;;
   update)    shift; cmd_update "${1:-latest}" ;;
   backup)    cmd_backup ;;
   restore)   shift; cmd_restore "${1:-}" "${2:-}" ;;

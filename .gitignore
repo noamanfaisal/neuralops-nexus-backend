@@ -319,3 +319,5 @@ modules/nexus-ai/tests/REPORT-live.md
 .*_refresh.py
 .probe*.py
 .ai-log-check.md
+# A local trial install of the release image (its own secrets and data).
+.trial/

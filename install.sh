@@ -2,14 +2,18 @@
 # =============================================================================
 # NeuralOps Nexus — one-command installer for Linux servers.
 #
-#   curl -fsSL https://raw.githubusercontent.com/mapax-io/neuralops-nexus/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/noamanfaisal/neuralops-get/main/install.sh | bash
 #
 # What it does, in order (every step is safe to re-run):
 #   1. checks the machine (Linux, x86_64/arm64, memory, disk), installs Docker if
 #      missing (asks first);
 #   2. asks ONE question — how the team reaches this server:
-#        (1) Tailscale      -> permanent HTTPS address via Tailscale Funnel (default)
-#        (2) a domain name  -> automatic HTTPS certificate (Caddy)
+#        (1) this server has a public IP (AWS, Azure, Google, any cloud server)
+#            -> we give it a FREE random https address <xxxxxx>.on.neuralopsnexus.ai
+#               (default; certificate by Caddy). A fresh install may get a
+#               different address; updates and restarts keep it.
+#        (2) Tailscale      -> permanent HTTPS address via Tailscale Funnel
+#      (Your own domain: --domain team.example.com — not part of the question.)
 #   3. downloads the compose file + nginx config, writes the env files,
 #      generates this install's secrets ONCE (never regenerated — that would
 #      replace the live database password), fixes the projects folder owner;
@@ -20,7 +24,9 @@
 #      backup / restart / stop / start / uninstall) and prints the address.
 #
 # Settings (environment variables or CLI arguments):
-#   NEURALOPS_MODE=tailscale (default) or domain
+#   NEURALOPS_MODE=public (default), tailscale, or domain (your own domain)
+#   NEURALOPS_PUBLIC_IP=1.2.3.4 (public mode: only when the server's public IP
+#     differs from the one it reaches the internet from, e.g. a NAT gateway)
 #   NEURALOPS_DOMAIN=team.example.com (for domain mode; or --domain <domain>)
 #   NEURALOPS_OWNER_EMAIL=person@example.com (reserves demo ownership; or --email <email>)
 #   NEURALOPS_TS_REACH=funnel (default) or serve
@@ -59,9 +65,12 @@ case "$OS_NAME" in
     ;;
 esac
 
-NEURALOPS_VERSION="${NEURALOPS_VERSION:-1.0.0}"
+NEURALOPS_VERSION="${NEURALOPS_VERSION:-1.1.4}"
 NEURALOPS_REF="${NEURALOPS_REF:-main}"
-NEURALOPS_RAW="${NEURALOPS_RAW:-https://raw.githubusercontent.com/mapax-io/neuralops-nexus/${NEURALOPS_REF}}"
+# The installer's public home: ONLY install.sh, the compose file, the nginx
+# config and the neuralops command — no app code (the code ships compiled in
+# the image). Published from the private repo by hand.
+NEURALOPS_RAW="${NEURALOPS_RAW:-https://raw.githubusercontent.com/noamanfaisal/neuralops-get/${NEURALOPS_REF}}"
 
 if [ -z "${NEURALOPS_DIR:-}" ]; then
   case "$OS_FAMILY" in
@@ -78,6 +87,16 @@ NEURALOPS_TS_REACH="${NEURALOPS_TS_REACH:-funnel}"
 NEURALOPS_TS_AUTHKEY="${NEURALOPS_TS_AUTHKEY:-}"
 NEURALOPS_TS_HOSTNAME="${NEURALOPS_TS_HOSTNAME:-neuralops}"
 NEURALOPS_YES="${NEURALOPS_YES:-}"
+NEURALOPS_PUBLIC_IP="${NEURALOPS_PUBLIC_IP:-}"
+# Where Caddy (ports 80/443) listens: all addresses, unless another program
+# holds 80/443 on a DIFFERENT address (see web_ports_free).
+CADDY_BIND="${CADDY_BIND:-0.0.0.0}"
+# The free-address service (portal/supabase/functions/claim-address).
+NEURALOPS_ADDRESS_URL="${NEURALOPS_ADDRESS_URL:-https://xgfsxikypxjhqlutiepw.supabase.co/functions/v1/claim-address}"
+# Supabase's PUBLIC anon key (the same one baked into every image and the web
+# app; safe to publish, it grants nothing by itself) — so the function works
+# whether or not "Verify JWT" is on.
+NEURALOPS_ADDRESS_KEY="${NEURALOPS_ADDRESS_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZnN4aWt5cHhqaHFsdXRpZXB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyNDg3MDcsImV4cCI6MjA5NzgyNDcwN30.2_OUNTHuKSeDJh6S-aUW16IqvDTmew8ZcFuKvFkt3Dk}"
 
 MIN_MEM_KB=$((3500 * 1024))   # ~3.5 GB — the engine's ML stack needs room
 MIN_DISK_KB=$((15 * 1024 * 1024))
@@ -159,7 +178,9 @@ check_machine() {
   esac
 
   case "$ARCH" in
-    x86_64|amd64|aarch64|arm64) ok "Architecture: $ARCH" ;;
+    x86_64|amd64) ok "Architecture: $ARCH" ;;
+    # 1.1.0 ships for Intel/AMD only; the ARM build follows.
+    aarch64|arm64) die "This server is ARM ($ARCH). This version of NeuralOps ships for x86_64 (Intel/AMD) servers; ARM support is coming. Please use an x86_64 server." ;;
     *) die "This server is $ARCH. NeuralOps currently ships for x86_64 (Intel/AMD) and aarch64 (ARM64) servers only." ;;
   esac
 
@@ -257,27 +278,77 @@ is_port_busy() {
   elif command -v lsof >/dev/null 2>&1; then
     lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1
   elif command -v netstat >/dev/null 2>&1; then
-    netstat -an 2>/dev/null | grep -Eq "(LISTEN|LISTENING).*[:.]$p[[:space:]]"
+    netstat -an 2>/dev/null | grep -Eq "(LISTEN|LISTENING).*[:.]${p}[[:space:]]"
   else
     return 1
   fi
+}
+
+# The address this machine's internet traffic leaves from (on a cloud server
+# behind 1:1 NAT, like AWS, the private address its public IP forwards to).
+main_ip() {
+  ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1
+}
+
+# Ports 80 + 443 for Caddy. Taken for us = something holds them on ALL
+# addresses or on the main address. Held only on ANOTHER address (Tailscale's
+# own 443 on its 100.x address, say) = still usable: Caddy then listens on the
+# main address only (CADDY_BIND), which is where the public traffic arrives.
+web_ports_free() {
+  CADDY_BIND="0.0.0.0"
+  if ! command -v ss >/dev/null 2>&1; then
+    if is_port_busy 80 || is_port_busy 443; then return 1; fi
+    return 0
+  fi
+  local p addrs main held_all=0 held_other=0
+  main="$(main_ip)"
+  for p in 80 443; do
+    addrs="$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ":${p}\$" || true)"
+    [ -n "$addrs" ] || continue
+    if printf '%s\n' "$addrs" | grep -Eq "^(0\\.0\\.0\\.0|\\*|\\[::\\]|${main//./\\.}):${p}\$"; then
+      held_all=1
+    else
+      held_other=1
+    fi
+  done
+  [ "$held_all" -eq 0 ] || return 1
+  if [ "$held_other" -eq 1 ]; then
+    [ -n "$main" ] || return 1
+    CADDY_BIND="$main"
+  fi
+  return 0
 }
 
 # ── 2. how the team reaches it ───────────────────────────────────────────────
 choose_access() {
   step "How will you reach NeuralOps?"
   if [ -z "$NEURALOPS_MODE" ]; then
-    say "  1) Tailscale (recommended for a machine at home or in the office)"
+    say "  1) This server has a public IP (AWS, Azure, Google, DigitalOcean, any cloud server)"
+    say "     we give it a free https address; ports 80 and 443 must be open"
+    say "  2) Tailscale (for a machine at home or in the office)"
     say "     a permanent secure address; needs a free Tailscale account"
-    say "  2) I have a domain (for a cloud server with a public address)"
-    say "     automatic HTTPS certificate"
     case "$(ask "Choose 1 or 2" "1")" in
-      2) NEURALOPS_MODE="domain" ;;
-      *) NEURALOPS_MODE="tailscale" ;;
+      2) NEURALOPS_MODE="tailscale" ;;
+      *) NEURALOPS_MODE="public" ;;
     esac
   fi
 
   case "$NEURALOPS_MODE" in
+    public)
+      $DOCKER rm -f neuralops-claim-check >/dev/null 2>&1 || true  # a stopped earlier run's check
+      if ! web_ports_free; then
+        if [ -n "$($DOCKER ps -q --filter "name=neuralops-caddy" 2>/dev/null || true)" ]; then
+          $DOCKER stop neuralops-caddy >/dev/null 2>&1 || true
+        fi
+        web_ports_free || die "Something on this machine already uses port 80 or 443 (another web server?). Stop it, or use option 2 (Tailscale)."
+      fi
+      if [ "$CADDY_BIND" != "0.0.0.0" ]; then
+        ok "Ports 80/443 are used elsewhere on another address; NeuralOps will listen on $CADDY_BIND"
+      fi
+      PROFILES="production,https"
+      SERVER_URL=""   # known once the address is claimed
+      ok "A free address will be set up for this server"
+      ;;
     tailscale)
       PROFILES="production"
       SERVER_URL=""   # known once Tailscale is configured
@@ -291,19 +362,17 @@ choose_access() {
       NEURALOPS_DOMAIN="${NEURALOPS_DOMAIN#https://}"
       NEURALOPS_DOMAIN="${NEURALOPS_DOMAIN%%/*}"
       [ -n "$NEURALOPS_DOMAIN" ] || die "A domain is needed for option 2."
-      if is_port_busy 80 || is_port_busy 443; then
+      if ! web_ports_free; then
         if [ -n "$($DOCKER ps -q --filter "name=neuralops-caddy" 2>/dev/null || true)" ]; then
           $DOCKER stop neuralops-caddy >/dev/null 2>&1 || true
         fi
-        if is_port_busy 80 || is_port_busy 443; then
-          die "Something on this machine already uses port 80 or 443 (another web server?). Stop it, or use option 1 (Tailscale)."
-        fi
+        web_ports_free || die "Something on this machine already uses port 80 or 443 (another web server?). Stop it, or use Tailscale."
       fi
       PROFILES="production,https"
       SERVER_URL="https://$NEURALOPS_DOMAIN"
       ok "Domain: $NEURALOPS_DOMAIN (its DNS must point at this server for the certificate)"
       ;;
-    *) die "NEURALOPS_MODE must be 'tailscale' or 'domain'." ;;
+    *) die "NEURALOPS_MODE must be 'public', 'tailscale' or 'domain'." ;;
   esac
 }
 
@@ -315,7 +384,7 @@ prepare_files() {
 
   local parent
   parent="$(dirname "$NEURALOPS_DIR")"
-  if [ -w "$parent" ] || [ ! -d "$parent" -a -w "$(dirname "$parent" 2>/dev/null || echo .)" ]; then
+  if [ -w "$parent" ] || { [ ! -d "$parent" ] && [ -w "$(dirname "$parent" 2>/dev/null || echo .)" ]; }; then
     mkdir -p "$NEURALOPS_DIR/neuralops" "$NEURALOPS_DIR/projects" "$NEURALOPS_DIR/backups"
   elif [ -n "$SUDO" ]; then
     $SUDO mkdir -p "$NEURALOPS_DIR/neuralops" "$NEURALOPS_DIR/projects" "$NEURALOPS_DIR/backups"
@@ -329,6 +398,10 @@ prepare_files() {
   fetch neuralops/nginx.conf "$NEURALOPS_DIR/neuralops/nginx.conf"
   ok "Downloaded the compose file and nginx config"
 
+  # The free address comes first in public mode: infra.env and app.env below
+  # carry it (Caddy's certificate and the server's own URL).
+  if [ "$NEURALOPS_MODE" = "public" ]; then claim_address; fi
+
   cat > "$NEURALOPS_DIR/neuralops/infra.env" <<EOF
 # Written by install.sh — the installer's settings for this server.
 COMPOSE_PROJECT_NAME=neuralops
@@ -338,6 +411,8 @@ POSTGRES_USER=neuralops
 NEURALOPS_DOMAIN=${NEURALOPS_DOMAIN}
 # nginx answers on this machine only: Caddy (domain mode) or Tailscale front it.
 NGINX_BIND=127.0.0.1
+# Where Caddy listens for 80/443 (0.0.0.0 = every address).
+CADDY_BIND=${CADDY_BIND}
 EOF
   # The helper reads these back; profiles travel in the shell, never relying
   # on an env file to pick them.
@@ -347,17 +422,19 @@ NEURALOPS_RAW=${NEURALOPS_RAW}
 NEURALOPS_IMAGE_REPO=${NEURALOPS_IMAGE_REPO}
 NEURALOPS_MODE=${NEURALOPS_MODE}
 PROFILES=${PROFILES}
+NEURALOPS_ADDRESS_URL=${NEURALOPS_ADDRESS_URL}
+NEURALOPS_ADDRESS_KEY=${NEURALOPS_ADDRESS_KEY}
+NEURALOPS_PUBLIC_IP=${NEURALOPS_PUBLIC_IP}
 EOF
   write_app_env "${SERVER_URL:-http://localhost:8095}"
 
   # Secrets: generated ONCE. An existing file is never touched.
   if [ ! -f "$NEURALOPS_DIR/neuralops/secrets.env" ]; then
     # An old database volume WITHOUT its secrets file would refuse the new
-    # password (postgres keeps the one it was created with) — stop and say so
-    # rather than produce a half-working install.
-    if $DOCKER volume inspect neuralops_neuralops_postgres_data >/dev/null 2>&1; then
-      die "An earlier NeuralOps database exists on this machine, but its secrets file is gone, so it cannot be opened. If you don't need that data, remove it with:  $DOCKER volume rm neuralops_neuralops_postgres_data  and run this installer again."
-    fi
+    # password (postgres keeps the one it was created with). Nothing is ever
+    # deleted: the old database is copied into a dated backup volume, and
+    # only then is the original cleared so this install starts fresh.
+    set_aside_old_database neuralops_neuralops_postgres_data
     step "Downloading NeuralOps (a few GB the first time; this takes a few minutes)"
     $DOCKER pull "${NEURALOPS_IMAGE_REPO}:${NEURALOPS_VERSION}"
     ( umask 077
@@ -376,12 +453,139 @@ EOF
   ok "Projects folder ready"
 }
 
+set_aside_old_database() {  # <the database volume>
+  local old="$1" backup holders
+  $DOCKER volume inspect "$old" >/dev/null 2>&1 || return 0
+  backup="neuralops_old_postgres_$(date +%Y%m%d-%H%M%S)"
+  warn "An earlier NeuralOps database is on this machine, but its secrets file is gone, so it cannot be opened."
+  say "It will be KEPT as a backup (Docker volume $backup), and this install starts with a fresh database."
+  confirm "Continue?" || die "Stopped. Nothing was changed."
+
+  # A stopped container from that earlier install still holds the volume;
+  # it is recreated below anyway. A RUNNING one means NeuralOps is in use.
+  holders="$($DOCKER ps -aq --filter "volume=$old" 2>/dev/null || true)"
+  if [ -n "$($DOCKER ps -q --filter "volume=$old" 2>/dev/null || true)" ]; then
+    die "That earlier database is in use by a running container ($($DOCKER ps --filter "volume=$old" --format '{{.Names}}' | tr '\n' ' ')). Stop it first, then run this installer again."
+  fi
+
+  $DOCKER volume create "$backup" >/dev/null || die "Could not create the backup volume; nothing was changed."
+  $DOCKER run --rm -v "$old:/from:ro" -v "$backup:/to" alpine:3.20 sh -c 'cp -a /from/. /to/' >/dev/null \
+    || die "Could not copy the earlier database aside; nothing was removed."
+  if [ -n "$holders" ]; then
+    # shellcheck disable=SC2086  # one id per word on purpose
+    $DOCKER rm $holders >/dev/null || die "Could not remove the stopped containers of the earlier install; the database backup is in $backup."
+  fi
+  $DOCKER volume rm "$old" >/dev/null || die "Could not clear the earlier database; it is also backed up in $backup."
+  ok "Earlier database kept as Docker volume $backup (remove it when you no longer need it: docker volume rm $backup)"
+}
+
 write_app_env() {
   cat > "$NEURALOPS_DIR/neuralops/app.env" <<EOF
 # Written by install.sh. The public address of THIS server.
 NEURALOPS_SERVER_URL=$1
 CENTRIFUGO_ALLOWED_ORIGINS=$1
 EOF
+}
+
+# ── 3b. the free address (public mode) ──────────────────────────────────────
+# Our address service (portal/supabase/functions/claim-address) gives this
+# server a random <xxxxxx>.on.neuralopsnexus.ai. To prove the IP is really
+# this server and that port 80 is open, a throwaway web server answers one
+# random token on port 80 while the service checks. The answer is kept in
+# neuralops/address.env (with the private code that lets this server move
+# the name when its IP changes, and give it back on uninstall) — so a
+# resumed install, an update or a restart keeps the same address.
+claim_address() {
+  step "Getting this server's address"
+  local addr_file="$NEURALOPS_DIR/neuralops/address.env"
+  local ip=""
+  if [ -f "$addr_file" ]; then
+    NEURALOPS_DOMAIN="$(sed -n 's/^NEURALOPS_DOMAIN=//p' "$addr_file")"
+    ip="$(sed -n 's/^NEURALOPS_PUBLIC_IP=//p' "$addr_file")"
+  fi
+
+  if [ -z "$NEURALOPS_DOMAIN" ]; then
+    local token webroot body answer status reason
+    token="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    webroot="$NEURALOPS_DIR/neuralops/claim-check"
+    mkdir -p "$webroot/.well-known/neuralops-claim"
+    printf '%s' "$token" > "$webroot/.well-known/neuralops-claim/$token"
+    chmod -R a+rX "$webroot"
+    $DOCKER rm -f neuralops-claim-check >/dev/null 2>&1 || true
+    $DOCKER run -d --rm --name neuralops-claim-check -p "$CADDY_BIND:80:80" \
+      -v "$webroot:/usr/share/nginx/html:ro" nginx:alpine >/dev/null \
+      || die "Could not open port 80 on this machine for the address check."
+    sleep 2
+
+    body="{\"action\":\"claim\",\"format\":\"env\",\"token\":\"$token\""
+    if [ -n "$NEURALOPS_PUBLIC_IP" ]; then body="$body,\"ip\":\"$NEURALOPS_PUBLIC_IP\""; fi
+    body="$body}"
+    # -4: the address is an IPv4 (A) record, so ask over IPv4.
+    answer="$(curl -4 -sS --max-time 60 -X POST -H 'Content-Type: application/json' \
+      -H "Authorization: Bearer $NEURALOPS_ADDRESS_KEY" \
+      -d "$body" -w '\n%{http_code}' "$NEURALOPS_ADDRESS_URL" 2>&1 || true)"
+    status="${answer##*$'\n'}"
+    answer="${answer%$'\n'*}"
+    $DOCKER rm -f neuralops-claim-check >/dev/null 2>&1 || true
+    rm -rf "$webroot"
+
+    if [ "$status" != "200" ]; then
+      reason="$(printf '%s\n' "$answer" | sed -n 's/^ERROR=//p' | head -1)"
+      [ -n "$reason" ] || reason="The address service could not be reached ($(printf '%s' "$answer" | head -c 200))."
+      die "$reason"
+    fi
+    NEURALOPS_DOMAIN="$(printf '%s\n' "$answer" | sed -n 's/^NEURALOPS_DOMAIN=//p')"
+    ip="$(printf '%s\n' "$answer" | sed -n 's/^NEURALOPS_PUBLIC_IP=//p')"
+    local code
+    code="$(printf '%s\n' "$answer" | sed -n 's/^NEURALOPS_ADDRESS_CODE=//p')"
+    case "$NEURALOPS_DOMAIN" in
+      *.on.neuralopsnexus.ai) ;;
+      *) die "The address service gave an unexpected answer. Try again in a few minutes, or use option 2 (Tailscale)." ;;
+    esac
+    ( umask 077
+      printf 'NEURALOPS_DOMAIN=%s\nNEURALOPS_PUBLIC_IP=%s\nNEURALOPS_ADDRESS_CODE=%s\n' \
+        "$NEURALOPS_DOMAIN" "$ip" "$code" > "$addr_file" )
+    ok "Address: https://$NEURALOPS_DOMAIN (points at $ip)"
+  else
+    ok "Address kept from the earlier run: https://$NEURALOPS_DOMAIN"
+  fi
+  SERVER_URL="https://$NEURALOPS_DOMAIN"
+
+  # Caddy asks for the certificate as soon as it starts; give the new name a
+  # moment to be visible first (it usually is within a minute). Caddy keeps
+  # retrying by itself if it is not.
+  if command -v getent >/dev/null 2>&1 && [ -n "$ip" ]; then
+    printf '  Waiting for the address to go live'
+    local live=0
+    for _ in $(seq 1 60); do
+      if getent hosts "$NEURALOPS_DOMAIN" 2>/dev/null | grep -qF "$ip"; then live=1; break; fi
+      printf '.'
+      sleep 3
+    done
+    echo
+    if [ "$live" -eq 0 ]; then warn "The address is not visible yet; the certificate will follow once it is."; fi
+  fi
+}
+
+# Public mode: a cloud server's IP can change (AWS gives a new one after every
+# stop/start). A small timer runs `neuralops address --quiet` at boot and every
+# 6 hours (most IP changes come with a reboot, which the boot run catches);
+# it moves the name to the new IP when needed and does nothing otherwise.
+setup_address_sync() {
+  [ "$NEURALOPS_MODE" = "public" ] || return 0
+  local cli="$NEURALOPS_DIR/neuralops/neuralops-cli.sh"
+  if [ "$OS_FAMILY" = "linux" ] && command -v systemctl >/dev/null 2>&1 && [ -d /etc/systemd/system ]; then
+    if printf '[Unit]\nDescription=Keep the NeuralOps address pointed at this server\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=%s address --quiet\n' "$cli" \
+         | ${SUDO:-} tee /etc/systemd/system/neuralops-address.service >/dev/null \
+      && printf '[Unit]\nDescription=Check the NeuralOps address at boot and every 6 hours\n\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec=6h\n\n[Install]\nWantedBy=timers.target\n' \
+         | ${SUDO:-} tee /etc/systemd/system/neuralops-address.timer >/dev/null \
+      && ${SUDO:-} systemctl daemon-reload >/dev/null 2>&1 \
+      && ${SUDO:-} systemctl enable --now neuralops-address.timer >/dev/null 2>&1; then
+      ok "The address follows this server if its IP changes (checked at boot and every 6 hours)"
+      return 0
+    fi
+  fi
+  warn "If this server's IP ever changes, run:  neuralops address"
 }
 
 # ── 4. Tailscale setup ────────────────────────────────────────────────────────
@@ -640,7 +844,10 @@ finish() {
   bold "  └────────────────────────────────────────────────────────────┘"
   echo
   say "Your server address:   $url"
-  if [ "$NEURALOPS_MODE" = "domain" ]; then
+  if [ "$NEURALOPS_MODE" = "public" ]; then
+    say "(A free address. Updates and restarts keep it; a fresh install gets a new one."
+    say " The HTTPS certificate is fetched on the first visit and can take a minute.)"
+  elif [ "$NEURALOPS_MODE" = "domain" ]; then
     say "(The HTTPS certificate is fetched on the first visit and can take a minute.)"
   elif [ "$NEURALOPS_MODE" = "tailscale" ]; then
     say "Anyone with this address can open the sign-in page; only people you invite can get in."
@@ -704,8 +911,11 @@ main() {
   if [ "$NEURALOPS_MODE" = "tailscale" ]; then setup_tailscale; fi
   first_run_setup
   install_helper
+  setup_address_sync
   date -u +"%Y-%m-%dT%H:%M:%SZ" > "$NEURALOPS_DIR/neuralops/.installed"
   finish
 }
 
-main "$@"
+# A test may source this file to run one step (NEURALOPS_TEST_SOURCE=1);
+# every real run — including `curl | bash` — starts main.
+if [ "${NEURALOPS_TEST_SOURCE:-}" != "1" ]; then main "$@"; fi

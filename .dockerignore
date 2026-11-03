@@ -49,6 +49,7 @@ modules/nexus-nucleus/media/avatars/*
 !modules/nexus-nucleus/media/avatars/pool/
 modules/nexus-nucleus/debug_playground.py
 .backups/
+.trial/
 **/.env
 data-pod/
 codegraph/

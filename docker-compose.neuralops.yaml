@@ -319,9 +319,12 @@ services:
     container_name: neuralops-caddy
     restart: unless-stopped
     command: ["caddy", "reverse-proxy", "--from", "${NEURALOPS_DOMAIN:-localhost}", "--to", "nginx:80"]
+    # CADDY_BIND (infra.env): every address by default; the installer narrows
+    # it to the main address when another program (Tailscale's own 443, say)
+    # already holds 80/443 on a different address of this machine.
     ports:
-      - "80:80"
-      - "443:443"
+      - "${CADDY_BIND:-0.0.0.0}:80:80"
+      - "${CADDY_BIND:-0.0.0.0}:443:443"
     volumes:
       - neuralops_caddy_data:/data
       - neuralops_caddy_config:/config
