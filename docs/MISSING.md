@@ -865,6 +865,67 @@ lesson 14) and rebuild the image — fold into the next image build.
   this: nucleus 475 · frontend 1141 · migrations through 0041 (engine
   unchanged).
 
+## 9b. GitHub: choose repositories like Vercel (owner, 2026-11-03) — NOT BUILT
+
+**Found live 2026-11-02/03 on Contabo (1.1.3 → 1.1.4).** "Connect with
+NeuralOps" for GitHub is an **OAuth App** (client id `Ov23li…`, tokens
+`gho_…`), not a GitHub App. So: no repo picker ever (an OAuth App token
+reaches every repo the account can), and GitHub skips its screens once the
+account has approved the app — a second GitHub server silently got the same
+account. 1.1.4 added `prompt=select_account` (oauth_client.build_authorize_url,
+every GitHub Connect shows the account picker), which helps only with a
+second GITHUB ACCOUNT. Same account + different repos per server is not
+possible with the OAuth App; today's answer is a fine-grained token per
+server ("Use my own token" → Static secret).
+
+The owner wants the Vercel experience. Two parts:
+
+1. **Move the vendor app to a GitHub App** (~half a day to a day of code +
+   tests, plus the owner's ~15 min on GitHub). Owner: create the GitHub App
+   (repo permissions: Contents, Issues, Pull requests, Metadata; callback =
+   the portal relay; "Request user authorization (OAuth) during
+   installation" on; expiring user tokens on), put its client id/secret in
+   the portal's oauth-exchange secrets. Code: catalog preset → the App's
+   client id + its own `exchange_provider`; oauth-exchange gets the provider
+   entry (code + refresh grants — App user tokens `ghu_…` expire in 8 h);
+   Connect sends a not-yet-installed account to
+   `github.com/apps/<slug>/installations/new` ("All repositories / Only
+   select repositories") and on to the callback; a "Manage repositories on
+   GitHub" link on the server card. Existing OAuth-App servers keep working
+   until reconnected. VERIFY AT BUILD: that the install URL carries our
+   `state` through to the callback.
+   Limit (same as Vercel): the repo choice is per GitHub account, not per
+   connection — two servers on one account see the same chosen repos.
+2. **Per-server repo list, enforced by NeuralOps** (~1 day): a
+   "Repositories this server may use" field on the MCP server (owner/repo
+   entries; empty = all the token can reach), checked by the ApprovalGate on
+   every GitHub tool call that names an owner/repo — a call outside the list
+   is refused with a worded reason. Gives GitHub2 → repo-a, GitHub3 → repo-b
+   on the same account. Tests: allowed/refused/empty-list/search tools that
+   take no repo.
+
+Also from the same session, smaller (1.1.5 candidates):
+- **Reconnect success is silent + the popup can stay open.** After GitHub's
+  account picker the popup did not close or report back (log shows the code
+  exchanged and tools fetched at 06:02:50 — the connect WORKED). The app's
+  fallback (`useMcpOAuthConnect` verifyConnected) compares `expires_at`
+  before/after; these GitHub tokens DO expire (expires_at + refresh token
+  stored), so the likely story is: GitHub's picker page severed the popup
+  from the app (COOP), the app saw the popup as "closed" at once, checked
+  BEFORE the exchange finished, found nothing changed → treated it as a
+  cancel, no toast. Fix: when the popup link is lost, keep polling the
+  server (a `connected_at` stamp set by the callback) for ~2 minutes instead
+  of checking once; the callback page says "Connected — you can close this
+  window" clearly when it cannot close itself. Confirm in a browser whether
+  GitHub's picker page severs `window.opener`.
+- **Account chooser for Google** (`prompt=select_account consent`) and a
+  line beside every Connect button: "Signs in as whoever is signed in to
+  <provider> in this browser — use a private window for another account."
+- **Direct tool call / per-message tool choice** (owner question, not
+  ruled): a slash command that calls one tool with the person's own
+  parameters and shows the raw result; a way to limit a single message to
+  chosen tools. Today: per-persona auto/ask/off per tool only.
+
 ## Post-test build queue (owner, 2026-10-22 morning — build AFTER the
 ## acceptance pass; design details to be ruled when each starts)
 

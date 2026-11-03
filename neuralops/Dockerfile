@@ -220,7 +220,7 @@ RUN groupadd -g $GID nexus && useradd -m -u $UID -g $GID -s /bin/bash nexus
 ENV SUPABASE_URL="https://xgfsxikypxjhqlutiepw.supabase.co" \
   SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZnN4aWt5cHhqaHFsdXRpZXB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyNDg3MDcsImV4cCI6MjA5NzgyNDcwN30.2_OUNTHuKSeDJh6S-aUW16IqvDTmew8ZcFuKvFkt3Dk" \
   NEURALOPS_PORTAL_URL="https://neuralopsnexus.ai/add_code" \
-  NEURALOPS_VERSION="1.0.0"
+  NEURALOPS_VERSION="1.1.4"
 
 COPY --from=nucleus-builder /opt/venv/nucleus-env /opt/venv/nucleus-env
 COPY --from=transport-builder /app/nexus-transport /usr/local/bin/nexus-transport
@@ -238,6 +238,23 @@ COPY --from=nexus-ai-builder /opt/venv/nexus-ai-env /opt/venv/nexus-ai-env
 # Build-time sanity check — a broken copy fails HERE, loudly, not at the
 # first chat message: the copied interpreter must import the heavy deps.
 RUN /opt/venv/nexus-ai-env/bin/python -c "import fastapi, sqlalchemy, pgvector, fastembed, torch; print('nexus-ai venv OK')"
+
+# ── The local model, baked in (owner, 2026-11-01: "make sure that docker
+# contains embedders") ─────────────────────────────────────────────────────
+# nomic-embed-text-v1.5 (fastembed/ONNX) is the ONE model the engine runs
+# locally: the vector store AND the output-type classifier use it
+# (vector_db/embedder.py DEFAULT_EMBEDDER, core/config.py CLASSIFIER_EMBEDDER).
+# Everything else that "thinks" (topics, memory, replies) uses the persona's
+# own model through its API. Before 1.1.0 it was downloaded on first use into
+# fastembed's default /tmp/fastembed_cache — inside the container, so every
+# recreate fetched ~0.5 GB again and an offline server could not embed at
+# all. FASTEMBED_CACHE_PATH points fastembed at the baked copy; a team that
+# picks another fastembed model still downloads that one here on first use.
+# Placed BEFORE the app code so a code change does not re-download it.
+ENV FASTEMBED_CACHE_PATH=/opt/models/fastembed
+RUN mkdir -p /opt/models/fastembed && \
+    /opt/venv/nexus-ai-env/bin/python -c "from fastembed import TextEmbedding; m = TextEmbedding('nomic-ai/nomic-embed-text-v1.5'); v = next(iter(m.embed(['ok']))); assert len(v) == 768, len(v); print('embedder baked:', len(v), 'dims')" && \
+    chown -R nexus:nexus /opt/models
 
 # ── The live browser's engine ────────────────────────────────────────────────
 # Chromium plus the system libraries it needs, ~450 MB, installed with the
