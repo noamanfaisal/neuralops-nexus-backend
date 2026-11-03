@@ -32,6 +32,7 @@ from dataclasses import replace as dc_replace
 from datetime import datetime, timezone
 from typing import AsyncIterator, Protocol
 
+from ai_engine.context.attached import attached_section, fit_attached, shown_whole_ids
 from ai_engine.context.budget import BudgetFitter, budget_for
 from ai_engine.context.context_builder import ContextBuilder
 from ai_engine.context.history_policy import HistoryPolicy
@@ -326,6 +327,33 @@ class PydanticAISystem:
                 except Exception as exc:  # noqa: BLE001 — memory is a bonus, never a blocker
                     log.exception("retrieval failed for job %s — replying without memory", job.job_id)
                     self._retrieval_detail["error"] = type(exc).__name__
+                # 1.1.3: the topic's attached files ride whole (or as much as
+                # fits) — not only when the message happens to resemble them.
+                attached = []
+                try:
+                    chunks = await asyncio.to_thread(
+                        self._store.topic_documents, job.company_id, job.project_id, job.topic_id)
+                    attached = fit_attached(chunks, self._settings.attached_docs_max_chars)
+                except Exception as exc:  # noqa: BLE001 — same rule: never blocks a reply
+                    log.exception("attached files unavailable for job %s", job.job_id)
+                    self._retrieval_detail["attached_error"] = type(exc).__name__
+                if attached:
+                    on_screen = shown_whole_ids(attached)
+                    hits = [h for h in hits if h.id not in on_screen]
+                    self._retrieval_detail["attached"] = [
+                        {"label": d.label, "chars": d.total_chars,
+                         "shown_chars": len(d.text), "whole": d.whole}
+                        for d in attached
+                    ]
+                    plan = dc_replace(plan, instructions=plan.instructions + (
+                        PromptSection(kind="attached", priority=75, stable=False,
+                                      text=attached_section(attached)),
+                    ))
+                    retrieved_refs = [
+                        RetrievedRef(id=d.chunk_ids[0], kind="context_source", label=d.label,
+                                     score=1.0, topic_id=job.topic_id)
+                        for d in attached
+                    ]
                 self._retrieval_detail["hits"] = [
                     {"id": h.id, "kind": h.kind, "label": h.label, "score": round(h.score, 4),
                      "topic_id": h.topic_id, "used_tools": list(h.used_tools or ()),
@@ -333,7 +361,7 @@ class PydanticAISystem:
                     for h in hits
                 ]
                 if hits:
-                    retrieved_refs = [
+                    retrieved_refs = retrieved_refs + [
                         RetrievedRef(id=h.id, kind=h.kind, label=h.label,
                                      score=round(h.score, 4), topic_id=h.topic_id)
                         for h in hits
@@ -342,6 +370,7 @@ class PydanticAISystem:
                         PromptSection(kind="retrieved", priority=50, stable=False,
                                       text=_retrieved_section(hits)),
                     ))
+                if retrieved_refs:
                     yield AgentEvent(
                         type=AgentEventType.CONTEXT_RETRIEVED,
                         id=job.msg_id, persona_id=persona.id, persona_name=persona.name,
@@ -621,9 +650,14 @@ class PydanticAISystem:
             top_k=top_k, min_score=min_score,
         ))
         merged = sorted(documents + memory, key=lambda h: h.score, reverse=True)
-        # the reply being written is itself indexed by nucleus later — but the
-        # TRIGGERING message may already be in the index; never quote it back
-        merged = [h for h in merged if h.id != job.msg_id]
+        # Never quote this turn back as "memory": the TRIGGERING message is
+        # indexed by nucleus as soon as it is posted, under its OWN id
+        # (user_message_id), not the reply's (msg_id). Filtering only msg_id
+        # let the question come back at score 0.98 as "(earlier in this
+        # topic)" — found live 2026-11-02: DeepSeek took its own question for
+        # a repeat and offered to search instead of searching.
+        own = {job.msg_id, job.user_message_id}
+        merged = [h for h in merged if h.id not in own]
         return merged[:top_k]
 
     async def _record_usage(self, shielded: bool = False) -> None:

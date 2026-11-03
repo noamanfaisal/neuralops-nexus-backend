@@ -24,7 +24,10 @@ from fastapi_app.contracts.trigger import TriggerJob
 NATIVE_TOOLS: dict[str, tuple[str, bool | None]] = {
     "filesystem": ("Read, list and write files in the project folder", None),
     "shell": ("Run shell commands in the project folder", None),
-    "web_search": ("Search the web", True),
+    # Models without built-in search (DeepSeek, most OpenAI-compatible ones)
+    # get the same tool under the name duckduckgo_search — say so, or the
+    # prompt's name and the callable's name disagree (found live 2026-11-02).
+    "web_search": ("Search the web (on some models this tool is called duckduckgo_search)", True),
     "web_fetch": ("Fetch a web page and read it", True),
     "thinking": ("Think longer before answering", True),
     # setup-copilot: the gateway's admin tools mounted inside (setup_tools.py) —

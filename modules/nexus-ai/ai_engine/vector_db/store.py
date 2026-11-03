@@ -58,3 +58,10 @@ class VectorStore(ABC):
     def projects_for_company(self, company_id: str) -> list[str]:
         """Project ids with an active index for this company — the legacy
         message delete carries only company_id, so it scans these."""
+
+    def topic_documents(self, company_id: str, project_id: str,
+                        topic_id: str) -> list[SearchHit]:
+        """Every chunk of the files attached to THIS topic (kind
+        context_source), in document order — not ranked by similarity. A
+        store without it simply has none."""
+        return []

@@ -36,3 +36,17 @@ def chunk_text(text: str, chunk_chars: int = CHUNK_CHARS) -> list[str]:
     if current:
         chunks.append("\n\n".join(current))
     return chunks
+
+
+def rejoin_chunks(chunks: list[str]) -> str:
+    """The inverse of chunk_text: a document's text back from its chunks, in
+    order, without the one-paragraph overlaps. Every chunk after the first
+    starts with the previous chunk's last paragraph (that is how chunk_text
+    packs them); it is dropped only when it really is the same paragraph."""
+    paragraphs: list[str] = []
+    for chunk in chunks:
+        parts = [p for p in chunk.split("\n\n") if p]
+        if paragraphs and parts and parts[0] == paragraphs[-1]:
+            parts = parts[1:]
+        paragraphs.extend(parts)
+    return "\n\n".join(paragraphs)

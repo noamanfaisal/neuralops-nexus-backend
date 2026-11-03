@@ -42,6 +42,10 @@ class EngineSettings:
     # Decision 9: always-search v1 — the threshold throws away weak hits.
     retrieval_top_k: int = field(default_factory=lambda: int(_env("RETRIEVAL_TOP_K", "6")))
     retrieval_min_score: float = field(default_factory=lambda: float(_env("RETRIEVAL_MIN_SCORE", "0.30")))
+    # 1.1.3: files attached to the topic are always shown, whole while they
+    # fit in this many characters (all files together, ~6k tokens); past it,
+    # the start of each is shown and similarity search covers the rest.
+    attached_docs_max_chars: int = field(default_factory=lambda: int(_env("ATTACHED_DOCS_MAX_CHARS", "24000")))
     # Item 23 (Layer 4): the output-type classifier's embedder, "provider[:model]".
     # Default = the vector store's local default, ONE cached model in production;
     # tests set "hash" (no downloads).

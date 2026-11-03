@@ -7,11 +7,17 @@ Everything is reached through the interfaces in store.py / embedder.py; txtai
 itself imports lazily inside txtai_store.py (it pulls torch — a process that
 never uses vectors never pays that import).
 """
+import threading
+
 from ai_engine.vector_db.embedder import Embedder, EmbedderFactory
 from ai_engine.vector_db.store import VectorStore, VectorStoreBusy
 
 _store = None
 _store_url: str | None = None
+# The embed endpoints run in a thread pool: two first calls at once used to
+# build TWO stores (found live 2026-11-02 on a fresh install — the second
+# one's CREATE TABLE raced the first and that message was never embedded).
+_store_lock = threading.Lock()
 
 
 def get_store() -> VectorStore | None:
@@ -23,11 +29,12 @@ def get_store() -> VectorStore | None:
     settings = EngineSettings()
     if not settings.vector_db_url:
         return None
-    if _store is None or _store_url != settings.vector_db_url:
-        from ai_engine.vector_db.txtai_store import TxtaiVectorStore
-        _store = TxtaiVectorStore(settings.vector_db_url, settings.vector_config_dir)
-        _store_url = settings.vector_db_url
-    return _store
+    with _store_lock:
+        if _store is None or _store_url != settings.vector_db_url:
+            from ai_engine.vector_db.txtai_store import TxtaiVectorStore
+            _store = TxtaiVectorStore(settings.vector_db_url, settings.vector_config_dir)
+            _store_url = settings.vector_db_url
+        return _store
 
 
 __all__ = ["Embedder", "EmbedderFactory", "VectorStore", "VectorStoreBusy", "get_store"]

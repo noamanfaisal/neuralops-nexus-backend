@@ -62,7 +62,12 @@ ROUTER_INSTRUCTIONS = (
     "yours — escalate it. NEVER answer yourself a request for code, a proof, "
     "an analysis, a summary of a text, a document, a plan, a translation of "
     "more than a line, or anything multi-step — however confident you feel, "
-    "those always escalate. When unsure, escalate with lane='standard'. "
+    "those always escalate. NEVER answer yourself a request to DO something "
+    "— create, edit, move or delete a file, run, send, post, fetch, search "
+    "or look anything up: you cannot act, so escalate it with "
+    "lane='standard'. Never say that something will be done, or that an "
+    "approval card is coming — only the model you hand over to can act. "
+    "When unsure, escalate with lane='standard'. "
     "(2) Return an Escalate with lane='standard' for ordinary questions and "
     "work — the persona's everyday model takes it with its full tools. This "
     "is the usual choice for anything real. "
@@ -82,6 +87,10 @@ ROUTER_INSTRUCTIONS = (
     # (nine router-only usage rows in a row, no standard/deep row ever).
     # The ceiling names the never-inline classes and defaults doubt to
     # lane='standard', the cheap mistake.
+    # ACTIONS added 2026-11-02 (Contabo, test 12): "@Coder delete
+    # app/test_hello.py" was answered by the tool-less DeepSeek router
+    # itself — "please confirm via the approval card" — and no card ever
+    # existed. Any request to act now escalates.
 )
 
 

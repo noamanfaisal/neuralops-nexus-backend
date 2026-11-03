@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS public.vx_indexes (
 
 _WALK_LIMIT = 1_000_000  # v1: a project's rows fit in memory for a re-embed
 _BATCH = 64
+# Chunks read back for a topic's attached files per reply: ~1,000 characters
+# each, so this is far beyond what the prompt budget will ever show.
+_TOPIC_DOC_ROWS = 2_000
 
 
 def _plain_function(call):
@@ -93,6 +96,10 @@ class TxtaiVectorStore(VectorStore):
         # it degrades to "active"/"none" — never to a fake "building".
         self._failed: dict[str, str] = {}
         with self._engine.begin() as conn:
+            # CREATE TABLE IF NOT EXISTS is not race-safe in Postgres: two
+            # sessions creating it at once collide on pg_type (found live
+            # 2026-11-02). One transaction-scoped lock serializes them.
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtext('neuralops.vx_indexes'))"))
             conn.execute(text(_REGISTRY_DDL))
 
     def close(self) -> None:
@@ -287,6 +294,30 @@ class TxtaiVectorStore(VectorStore):
                 created_at=r.get("created_at") or "",
             ))
         return hits
+
+    def topic_documents(self, company_id: str, project_id: str,
+                        topic_id: str) -> list[SearchHit]:
+        row = self._row(project_id, "active")
+        if row is None or not topic_id:
+            return []
+        emb = self._open(row)
+        rows = emb.search(
+            "select id, text, kind, label, topic, created_at from txtai"
+            " where kind = :k and topic = :t and company = :c and project = :p",
+            _TOPIC_DOC_ROWS,
+            parameters={"k": "context_source", "t": topic_id,
+                        "c": company_id, "p": project_id})
+        hits = [SearchHit(
+            id=str(r["id"]), kind=r.get("kind") or "", label=r.get("label") or "",
+            score=1.0, text=r.get("text") or "", topic_id=(r.get("topic") or None),
+            created_at=r.get("created_at") or "",
+        ) for r in rows]
+
+        def order(hit: SearchHit):
+            # chunk ids are "<source_id>:<n>" (routers/embed.py)
+            base, _, n = hit.id.rpartition(":")
+            return (base, int(n) if n.isdigit() else 0)
+        return sorted(hits, key=order)
 
     def _ids_where(self, row: dict, clause: str, parameters: dict) -> list[str]:
         emb = self._open(row)
