@@ -31,6 +31,11 @@ django-celery-beat
 
 # File Handling
 pillow
+# Text out of attached PDF and Word files (context/services.py). The code
+# always expected them; they were never installed, so every PDF/DOCX attached
+# in chat failed with "pypdf not installed" (found live 2026-11-02, Contabo).
+pypdf==6.21.4
+python-docx==1.2.0
 
 # File viewer (Step 5, docs/NUCLEUS-REVAMP.md §3) — markdown rendering and
 # code highlighting for view-as-HTML. OPTIONAL at runtime: workspace/files.py

@@ -60,6 +60,12 @@ def _redirect_uri(cfg: dict | None = None) -> str:
     return f"{base}/api/v1/mcp-servers/oauth/callback/"
 
 
+def _is_github(authorize_endpoint: str | None) -> bool:
+    from urllib.parse import urlsplit
+    host = (urlsplit(authorize_endpoint or "").hostname or "").lower()
+    return host == "github.com" or host.endswith(".github.com")
+
+
 def build_authorize_url(server, frontend_origin: str) -> str:
     """
     frontend_origin: window.location.origin of the tab that asked for this --
@@ -91,6 +97,14 @@ def build_authorize_url(server, frontend_origin: str) -> str:
     # the provider actually returns a refresh_token. Generic -- any auth-code
     # provider works by supplying its own endpoints/scopes/params.
     extra = {str(k): str(v) for k, v in (cfg.get("authorize_params") or {}).items()}
+    # GitHub skips its screens entirely for an app the browser's account has
+    # already authorized, so a second GitHub server silently got the SAME
+    # account (found live 2026-11-02). prompt=select_account makes GitHub show
+    # its account picker on every Connect -- pick a signed-in account or "use a
+    # different account". Applies to rows created before this too, and to
+    # paste-your-own GitHub OAuth apps; an explicit prompt param still wins.
+    if _is_github(cfg.get("authorize_endpoint")) and "prompt" not in extra:
+        extra["prompt"] = "select_account"
     url, _ = client.create_authorization_url(
         cfg["authorize_endpoint"], state=state, code_verifier=code_verifier, **extra,
     )

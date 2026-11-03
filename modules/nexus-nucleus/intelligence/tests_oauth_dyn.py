@@ -329,6 +329,34 @@ class OAuthRoadsApiTests(MentionRightFixture):
         server.refresh_from_db()
         self.assertEqual(len(server.tools), 2)
 
+    def test_github_connect_always_shows_the_account_picker(self):
+        """Found live 2026-11-02: GitHub skips every screen for an app the
+        browser's account already authorized, so a second GitHub server got
+        the same account without asking. Every GitHub Connect now carries
+        prompt=select_account; other providers are untouched, and an explicit
+        prompt in authorize_params still wins."""
+        from urllib.parse import parse_qs, urlsplit
+        gh = self._server(
+            client_id="Ov23liTRtfeWiJ03y4Gp", authorize_endpoint="https://github.com/login/oauth/authorize",
+            token_endpoint="https://github.com/login/oauth/access_token", scopes=["repo"],
+            redirect_mode="portal_relay", authorize_params={},
+        )
+        qs = parse_qs(urlsplit(oauth_client.build_authorize_url(gh, "http://x")).query)
+        self.assertEqual(qs["prompt"], ["select_account"])
+        gh.oauth_config = {**gh.oauth_config, "authorize_params": {"prompt": "consent"}}
+        gh.save()
+        qs = parse_qs(urlsplit(oauth_client.build_authorize_url(gh, "http://x")).query)
+        self.assertEqual(qs["prompt"], ["consent"])
+        other = MCPServer.objects.create(
+            company=self.company, project=self.p1, name="Not GitHub",
+            transport=MCPServer.Transport.HTTP, url="https://modern.example/mcp",
+            auth_type=MCPServer.AuthType.OAUTH2,
+            oauth_config={"client_id": "c", "authorize_endpoint": "https://evilgithub.com/authorize",
+                          "token_endpoint": "https://evilgithub.com/t"},
+        )
+        qs = parse_qs(urlsplit(oauth_client.build_authorize_url(other, "http://x")).query)
+        self.assertNotIn("prompt", qs)
+
     def test_the_github_tile_carries_the_vendor_app_id(self):
         r = self.call("get", "/api/v1/mcp-catalog/", self.sara)
         github = next(e for e in r.json() if e["id"] == "github")
