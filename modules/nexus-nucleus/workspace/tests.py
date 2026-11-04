@@ -684,6 +684,32 @@ class TeamRouteGateTests(PeerFixture):
         self.assertEqual(self.call(pm, "post", f"/api/v1/projects/{self.p1.id}/team/", {"user_id": str(self.sara.id)}).status_code, 200)
         self.assertEqual(self.call(pm, "post", f"/api/v1/projects/{self.p2.id}/team/", {"user_id": str(self.sara.id)}).status_code, 404)
 
+    def test_a_project_admin_invites_new_people_into_their_project_only(self):
+        """Owner, 2026-11-03: adding members is allowed to project admins too.
+        Someone brand new gets a pending invitation whose grant is THIS project
+        only (no company-scope role); the owner role is not theirs to give; and
+        another project stays out of reach."""
+        pm = User.objects.create_user(username="pm", email="pm@acme.test", password="x")
+        CompanyAccess.objects.create(company=self.company, user=pm, role="admin", invited_by=self.owner)
+        apply_grants(self.company, pm, [self.whole(self.p1)], "admin", self.owner)
+        p = f"/api/v1/projects/{self.p1.id}/team/invite/"
+        r = self.call(pm, "post", p, {"email": "new@acme.test", "scope": "project", "role": "member"})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["is_new_user"])
+        self.assertEqual(Invitation.objects.get(email="new@acme.test").access_payload, {"grants": [self.whole(self.p1)]})
+        # An admin OF THIS PROJECT is fine -- still scoped to p1.
+        r = self.call(pm, "post", p, {"email": "lead@acme.test", "scope": "project", "role": "admin"})
+        self.assertEqual(r.status_code, 200, r.content)
+        # Owner is never a project admin's to hand out.
+        r = self.call(pm, "post", p, {"email": "boss@acme.test", "scope": "project", "role": "owner"})
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn("owner", r.json()["detail"])
+        self.assertFalse(Invitation.objects.filter(email="boss@acme.test").exists())
+        # Another project: not theirs.
+        r = self.call(pm, "post", f"/api/v1/projects/{self.p2.id}/team/invite/", {"email": "x@acme.test", "scope": "project"})
+        self.assertIn(r.status_code, (403, 404), r.content)
+        self.assertFalse(Invitation.objects.filter(email="x@acme.test").exists())
+
 
 class ListMembersTests(InviteGrantsFixture):
     """The server-wide members list carries the name the rest of the app shows."""

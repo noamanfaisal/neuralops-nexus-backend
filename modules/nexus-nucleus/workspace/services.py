@@ -1031,6 +1031,14 @@ def invite_to_project(
     if not email:
         raise ValueError("Provide either an email address or a persona name.")
 
+    # Project admins may invite (owner, 2026-11-03), and the grant below is
+    # scoped to this project -- but "owner" is never theirs to hand out: only
+    # someone who may manage the server's members can invite as owner.
+    if role == CompanyAccess.Role.OWNER and not PermissionChecker.can(
+        inviter, "company.invite_member", company=company
+    ):
+        raise ValueError("Only the server's owner or admins can invite someone as owner.")
+
     # One grant -- the whole project, or just this topic. invite_to_system()
     # owns membership and applies it at once for a known user, or stores it
     # on the pending Invitation for acceptance when they are brand new. Both
