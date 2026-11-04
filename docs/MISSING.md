@@ -943,6 +943,29 @@ LATER: a signature (the checksum proves a whole download, not who wrote
 it); a Google key on the building server (Google's list is from its docs).
 Release note: 1.1.6 must also publish docker-compose.neuralops.yaml (the
 new volume) to neuralops-get, which `neuralops update` fetches.
+Shipped 2026-11-04: Docker Hub 1.1.6 + latest, neuralops-get ba4f1af,
+Contabo updated (volume on nucleus + celery; download "unchanged").
+
+## 9d. A safe `neuralops update` (owner, 2026-11-04) — NOT BUILT, next release
+
+Found on MKTV: `neuralops update 1.1.6` run without sudo, and before 1.1.6
+was published. It stopped at the backup (nothing changed), but:
+- **Permission**: `mkdir -p "$dir" && chmod` in cmd_backup does not trip
+  `set -e`; it carried on to a write that failed. Re-run itself with sudo
+  when the install folder is not writable; otherwise stop with "run as root"
+  before anything else.
+- **No release check**: update always fetches main's compose/nginx/cli,
+  whatever version is asked (`update 1.1.4` today pairs the 1.1.4 image with
+  the newest compose), and edits infra.env before `compose pull` (an
+  unpublished tag leaves infra.env pointing at nothing).
+- Build: neuralops-get `releases.json` (latest + per version: files and
+  sha256, like the catalog) and `releases/<V>/` folders; update refuses an
+  unlisted version, downloads + verifies into a temp folder, pulls the image
+  FIRST, then swaps files/infra.env and restarts; not healthy -> put the old
+  image and files back. `neuralops update --check` shows current vs newest.
+  Publish order: image, then the version's files, releases.json LAST.
+- The CLI is not in the image: it ships through neuralops-get only, and a
+  server's first update after it still runs the old CLI.
 
 ## Post-test build queue (owner, 2026-10-22 morning — build AFTER the
 ## acceptance pass; design details to be ruled when each starts)
