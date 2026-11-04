@@ -139,6 +139,9 @@ services:
       # runs the filesystem MCP server against it. Must be the SAME mount as
       # nexus-ai's below or nucleus's created folders are invisible to it.
       - ./projects:/nexus/projects
+      # The downloaded model catalog (intelligence/models_catalog.py): the
+      # worker writes it, nucleus reads it -- the SAME volume on both.
+      - neuralops_catalog:/nexus/catalog
     env_file:
       - ./neuralops/secrets.env
       - ./neuralops/app.env
@@ -163,6 +166,8 @@ services:
     container_name: neuralops-nucleus-celery
     command: ["nucleus-env", "celery", "-A", "core", "worker", "-l", "info"]
     restart: unless-stopped
+    volumes:
+      - neuralops_catalog:/nexus/catalog   # writes the model catalog nucleus reads
     env_file:
       - ./neuralops/secrets.env
     environment:
@@ -362,6 +367,7 @@ services:
       # exactly -- see PROJECTS_ROOT's comment in core/settings.py.
       - ./projects:/nexus/projects
       - /data/mcp-keys:/nexus/keys:ro
+      - neuralops_catalog_dev:/nexus/catalog
     env_file:
       - ./neuralops/secrets.env
     environment:
@@ -412,6 +418,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./modules/nexus-nucleus:/nexus/nucleus
+      - neuralops_catalog_dev:/nexus/catalog
     env_file:
       - ./neuralops/secrets.env
     environment:
@@ -670,3 +677,5 @@ volumes:
   neuralops_fastembed_cache_new:
   neuralops_projects_dev:
   neuralops_web_app_node_modules:
+  neuralops_catalog:
+  neuralops_catalog_dev:

@@ -1,0 +1,303 @@
+{
+ "schema": 1,
+ "version": "2026-11-04.1",
+ "generated_at": "2026-11-04T22:00:19+00:00",
+ "providers": {
+  "anthropic": [
+   {
+    "id": "claude-sonnet-5-5",
+    "label": "Claude Sonnet 5.5",
+    "recommended": true,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-haiku-5-5",
+    "label": "Claude Haiku 5.5",
+    "recommended": true,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-opus-5-5",
+    "label": "Claude Opus 5.5",
+    "recommended": true,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-fable-5-1",
+    "label": "Claude Fable 5.1",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-opus-5",
+    "label": "Claude Opus 5",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-sonnet-5",
+    "label": "Claude Sonnet 5",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-fable-5",
+    "label": "Claude Fable 5",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-opus-4-8",
+    "label": "Claude Opus 4.8",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-opus-4-7",
+    "label": "Claude Opus 4.7",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-sonnet-4-6",
+    "label": "Claude Sonnet 4.6",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-opus-4-6",
+    "label": "Claude Opus 4.6",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "claude-opus-4-5-20251101",
+    "label": "Claude Opus 4.5",
+    "recommended": false,
+    "preview": false,
+    "context_window": 200000,
+    "max_output_tokens": 64000
+   },
+   {
+    "id": "claude-haiku-4-5-20251001",
+    "label": "Claude Haiku 4.5",
+    "recommended": false,
+    "preview": false,
+    "context_window": 200000,
+    "max_output_tokens": 64000
+   },
+   {
+    "id": "claude-sonnet-4-5-20250929",
+    "label": "Claude Sonnet 4.5",
+    "recommended": false,
+    "preview": false,
+    "context_window": 200000,
+    "max_output_tokens": 64000
+   }
+  ],
+  "openai": [
+   {
+    "id": "gpt-5.6-terra",
+    "label": "gpt-5.6-terra",
+    "recommended": false,
+    "preview": false,
+    "context_window": 922000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "gpt-5.6-sol",
+    "label": "gpt-5.6-sol",
+    "recommended": false,
+    "preview": false,
+    "context_window": 922000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "gpt-5.4-mini",
+    "label": "gpt-5.4-mini",
+    "recommended": false,
+    "preview": false,
+    "context_window": 272000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "gpt-5.4",
+    "label": "gpt-5.4",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1050000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "gpt-5.1",
+    "label": "gpt-5.1",
+    "recommended": false,
+    "preview": false,
+    "context_window": 272000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "gpt-5-mini",
+    "label": "gpt-5-mini",
+    "recommended": false,
+    "preview": false,
+    "context_window": 272000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "gpt-5",
+    "label": "gpt-5",
+    "recommended": false,
+    "preview": false,
+    "context_window": 272000,
+    "max_output_tokens": 128000
+   },
+   {
+    "id": "gpt-4o-mini",
+    "label": "gpt-4o-mini",
+    "recommended": false,
+    "preview": false,
+    "context_window": 128000,
+    "max_output_tokens": 16384
+   },
+   {
+    "id": "gpt-4o",
+    "label": "gpt-4o",
+    "recommended": false,
+    "preview": false,
+    "context_window": 128000,
+    "max_output_tokens": 16384
+   },
+   {
+    "id": "gpt-4.1",
+    "label": "gpt-4.1",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1047576,
+    "max_output_tokens": 32768
+   }
+  ],
+  "google": [
+   {
+    "id": "gemini-3.8-flash",
+    "label": "gemini-3.8-flash",
+    "recommended": true,
+    "preview": false,
+    "context_window": 1048576,
+    "max_output_tokens": 65536
+   },
+   {
+    "id": "gemini-4-argon",
+    "label": "gemini-4-argon",
+    "recommended": true,
+    "preview": false,
+    "context_window": 1048576,
+    "max_output_tokens": 1048576
+   },
+   {
+    "id": "gemini-3.6-flash",
+    "label": "gemini-3.6-flash",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1048576,
+    "max_output_tokens": 65536
+   },
+   {
+    "id": "gemini-3.5-flash-lite",
+    "label": "gemini-3.5-flash-lite",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1048576,
+    "max_output_tokens": 65536
+   },
+   {
+    "id": "gemini-3.1-flash-lite",
+    "label": "gemini-3.1-flash-lite",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1048576,
+    "max_output_tokens": 65536
+   },
+   {
+    "id": "gemini-2.5-pro",
+    "label": "gemini-2.5-pro",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1048576,
+    "max_output_tokens": 65535
+   },
+   {
+    "id": "gemini-2.5-flash",
+    "label": "gemini-2.5-flash",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1048576,
+    "max_output_tokens": 65535
+   },
+   {
+    "id": "gemini-2.5-flash-lite",
+    "label": "gemini-2.5-flash-lite",
+    "recommended": false,
+    "preview": false,
+    "context_window": 1048576,
+    "max_output_tokens": 65535
+   },
+   {
+    "id": "gemini-3-flash-preview",
+    "label": "gemini-3-flash-preview",
+    "recommended": false,
+    "preview": true,
+    "context_window": 1048576,
+    "max_output_tokens": 65535
+   },
+   {
+    "id": "gemini-3.1-pro-preview",
+    "label": "gemini-3.1-pro-preview",
+    "recommended": false,
+    "preview": true,
+    "context_window": 1048576,
+    "max_output_tokens": 65536
+   }
+  ],
+  "deepseek": [
+   {
+    "id": "deepseek-flash",
+    "label": "DeepSeek V4.1 Flash — 1M context, thinking mode, images",
+    "recommended": true,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 393216
+   },
+   {
+    "id": "deepseek-v4-pro",
+    "label": "DeepSeek V4 Pro — stronger reasoning and agents, 1M context, text only",
+    "recommended": true,
+    "preview": false,
+    "context_window": 1000000,
+    "max_output_tokens": 393216
+   }
+  ]
+ }
+}

@@ -381,11 +381,25 @@ MODEL_PRICES_URL = os.getenv(
     "MODEL_PRICES_URL",
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
 )
+# The model-id catalog (owner, 2026-11-04; intelligence/models_catalog.py):
+# models.json is built into the image; the worker keeps a newer copy in
+# MODELS_CATALOG_DIR (a volume), downloaded from MODELS_CATALOG_URL at worker
+# start-up and daily -- only when newer and its .sha256 matches. Set
+# MODELS_CATALOG_URL="" to stay on the built-in copy.
+MODELS_CATALOG_URL = os.getenv(
+    "MODELS_CATALOG_URL",
+    "https://raw.githubusercontent.com/noamanfaisal/neuralops-get/main/catalog/models.json",
+)
+MODELS_CATALOG_DIR = os.getenv("MODELS_CATALOG_DIR", "/nexus/catalog")
 # DatabaseScheduler syncs these static entries into PeriodicTask rows on beat
 # start — so this coexists with the runtime PersonaSchedule rows.
 CELERY_BEAT_SCHEDULE = {
     "refresh-model-prices-daily": {
         "task": "intelligence.tasks.refresh_model_prices",
+        "schedule": 60 * 60 * 24,
+    },
+    "refresh-models-catalog-daily": {
+        "task": "intelligence.tasks.refresh_models_catalog",
         "schedule": 60 * 60 * 24,
     },
     # Step 3 (handoff change 9): a paused reply older than 24h is resumed

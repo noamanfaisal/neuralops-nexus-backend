@@ -926,6 +926,24 @@ Also from the same session, smaller (1.1.5 candidates):
   parameters and shows the raw result; a way to limit a single message to
   chosen tools. Today: per-persona auto/ask/off per tool only.
 
+## 9c. Model catalog (owner, 2026-11-04) — BUILT, ships in 1.1.6
+
+The model dialog's suggestions come from the SERVER only (GET
+/api/v1/model-catalog/?provider=), never OpenRouter from the browser (whose
+DeepSeek names DeepSeek refuses). models.json is built into the image
+(intelligence/data/models_catalog.json); the worker downloads
+neuralops-get/catalog/models.json at start-up and daily into the
+`neuralops_catalog` volume, kept only when NEWER and its .sha256 matches.
+Regenerate with `manage.py build_models_catalog --out ...` on a server that
+holds provider keys (each id is tested with a one-word chat; OpenAI's list
+still carries retired and Responses-only ids), then publish models.json +
+.sha256 to neuralops-get/catalog/ and copy the file into the image.
+Curated marks: intelligence/data/models_catalog_overrides.json.
+LATER: a signature (the checksum proves a whole download, not who wrote
+it); a Google key on the building server (Google's list is from its docs).
+Release note: 1.1.6 must also publish docker-compose.neuralops.yaml (the
+new volume) to neuralops-get, which `neuralops update` fetches.
+
 ## Post-test build queue (owner, 2026-10-22 morning — build AFTER the
 ## acceptance pass; design details to be ruled when each starts)
 

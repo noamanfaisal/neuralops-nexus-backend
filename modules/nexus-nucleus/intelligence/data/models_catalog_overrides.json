@@ -1,0 +1,29 @@
+{
+ "_comment": "Curated marks for build_models_catalog (see intelligence/models_catalog.py). hidden: ids a provider still accepts but we do not offer. recommended: shown first, in this order. labels: friendly names. preview: marked as preview. fallback: the list used for a provider whose own list could not be read (no key on the server that builds the file) -- taken from the provider's docs, with the date. Keep this file small.",
+ "deepseek": {
+  "recommended": ["deepseek-flash", "deepseek-v4-pro"],
+  "hidden": ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"],
+  "labels": {
+   "deepseek-flash": "DeepSeek V4.1 Flash — 1M context, thinking mode, images",
+   "deepseek-v4-pro": "DeepSeek V4 Pro — stronger reasoning and agents, 1M context, text only"
+  }
+ },
+ "anthropic": {
+  "recommended": ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"],
+  "hidden": [],
+  "labels": {}
+ },
+ "openai": {
+  "recommended": [],
+  "hidden": [],
+  "labels": {}
+ },
+ "google": {
+  "recommended": ["gemini-3.8-flash", "gemini-4-argon"],
+  "hidden": ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-3-pro-preview"],
+  "preview": ["gemini-3-flash-preview", "gemini-3.1-pro-preview"],
+  "labels": {},
+  "_fallback_source": "ai.google.dev/gemini-api/docs/models, read 2026-11-04",
+  "fallback": ["gemini-3.8-flash", "gemini-4-argon", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview", "gemini-3.1-pro-preview"]
+ }
+}

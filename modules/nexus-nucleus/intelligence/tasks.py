@@ -119,6 +119,17 @@ def refresh_model_prices() -> str:
     return f"saved {saved} price rows"
 
 
+@shared_task(name="intelligence.tasks.refresh_models_catalog")
+def refresh_models_catalog() -> str:
+    """The model-id catalog (owner, 2026-11-04): fetch the hosted models.json,
+    keep it only when newer, whole (sha256) and valid. Daily + at worker start."""
+    from intelligence import models_catalog
+
+    result = models_catalog.refresh()
+    logger.info("[models-catalog] %s", result)
+    return result
+
+
 # ── Step 3 (handoff change 10): the reindex driver ───────────────────────
 
 # The system default (decision 3): local fastembed, no company-level default.

@@ -22,3 +22,17 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 
 # Auto-discover tasks in all INSTALLED_APPS
 app.autodiscover_tasks()
+
+
+from celery.signals import worker_ready  # noqa: E402
+
+
+@worker_ready.connect
+def _refresh_models_catalog_on_start(sender=None, **kwargs):
+    """The model catalog is checked at start-up as well as daily (owner,
+    2026-11-04) -- queued, so a slow or offline download never holds the
+    worker up."""
+    try:
+        sender.app.send_task("intelligence.tasks.refresh_models_catalog", countdown=10)
+    except Exception:  # noqa: BLE001 -- never block the worker on this
+        pass

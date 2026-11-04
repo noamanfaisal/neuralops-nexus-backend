@@ -287,7 +287,10 @@ RUN mkdir -p /opt/models/fastembed && \
 # something -- confirmed, this is exactly the bug that was hit.
 COPY --from=code-builder /code/nucleus /nexus/nucleus
 COPY --from=code-builder /code/ai /nexus/ai
-RUN mkdir -p /nexus/projects /nexus/logs/nucleus /nexus/logs/ai /home/nexus/.cache/fastembed && \
+# /nexus/catalog: the downloaded model catalog (intelligence/models_catalog.py),
+# a named volume in compose -- created here so the volume inherits nexus's
+# ownership on first mount.
+RUN mkdir -p /nexus/projects /nexus/catalog /nexus/logs/nucleus /nexus/logs/ai /home/nexus/.cache/fastembed && \
   chown -R nexus:nexus /nexus /home/nexus/.cache
 
 COPY neuralops/entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -1105,6 +1105,25 @@ def model_presets(request):
     return model_presets_content.catalog()
 
 
+@router.get("/model-catalog/", response=dict)
+def model_catalog(request, provider: str):
+    """The model ids a provider takes, for the model dialog's suggestions
+    (owner, 2026-11-04): from the server's model catalog -- the copy built
+    into the image, or a newer checksum-verified download
+    (intelligence/models_catalog.py). The app asks only this."""
+    from intelligence import models_catalog
+
+    company = _company(request)
+    if not (PermissionChecker.can(request.auth, "model_config.create", company=company)
+            or PermissionChecker.can(request.auth, "model_config.update", company=company)):
+        raise HttpError(403, "You don't have permission to register models.")
+    try:
+        return models_catalog.models_for(provider)
+    except models_catalog.CatalogError as exc:
+        logger.error("[models-catalog] no usable catalog: %s", exc)
+        return {"version": None, "models": []}
+
+
 @router.get("/output-types/")
 def list_output_types(request):
     """
