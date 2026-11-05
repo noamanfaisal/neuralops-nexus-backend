@@ -967,6 +967,21 @@ was published. It stopped at the backup (nothing changed), but:
 - The CLI is not in the image: it ships through neuralops-get only, and a
   server's first update after it still runs the old CLI.
 
+## 9e. MCP list: the "<Project> Capabilities" row reads as a leak (owner,
+## 2026-11-04) — NOT BUILT, frontend only
+
+Every project is provisioned with one internal, protected MCPServer row,
+`name = f"{project.name} Capabilities"` (workspace/services.py). The MCP
+tab lists it like a user-added server, so on MKTV the owner read
+"mktv-financial-project Capabilities" as something MKTV-private shipping
+in the public product (it isn't: the name is minted on each install from
+the project's own name; no "mktv" string exists in the product).
+Build: in mcp-tab.tsx, put rows with `is_internal` under a separate
+"Built-in" section with a one-line note ("created with the project;
+holds its filesystem/shell/web capabilities") — or hide them while those
+capabilities still show "Coming soon". The API already returns
+`is_internal`; no backend change.
+
 ## Post-test build queue (owner, 2026-10-22 morning — build AFTER the
 ## acceptance pass; design details to be ruled when each starts)
 
