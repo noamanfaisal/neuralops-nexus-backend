@@ -186,17 +186,28 @@ class NexusAIClient:
             raise RuntimeError(f"nexus-ai /models/transform/ returned {resp.status_code}: {resp.text[:300]}")
         return resp.json()
 
-    def list_mcp_tools(self, url: str, bearer_token: str | None = None) -> tuple[bool, list | str]:
+    def list_mcp_tools(self, url: str | None, bearer_token: str | None = None, *,
+                       command: str | None = None, env: dict | None = None,
+                       server_id: str | None = None) -> tuple[bool, list | str]:
         """POST /mcp/tools/ (Step 6, change 6) — the engine dials an MCP server
         and lists its tools [{name, one_line, read_only}]. (True, tools) or
         (False, reason) — the reason is shown verbatim next to the Refresh
-        button, never raised."""
+        button, never raised.
+
+        Two roads (stdio landed 2026-11-08): url for HTTP servers, or
+        command (+ decrypted secret env, + server_id for the engine's
+        per-server SSH key file) for stdio servers — the engine SPAWNS
+        those, and the first npx/uvx spawn downloads the package, hence
+        the longer timeout."""
         if not self.configured:
             return False, "NEXUS_AI_URL not configured"
         try:
             resp = httpx.post(f"{self.base_url}/api/v1/mcp/tools/",
-                              json={"url": url, "bearer_token": bearer_token},
-                              headers=self._headers, timeout=30)
+                              json={"url": url, "bearer_token": bearer_token,
+                                    "command": command, "env": env,
+                                    "server_id": server_id},
+                              headers=self._headers,
+                              timeout=120 if command else 30)
             if resp.status_code == 200:
                 return True, resp.json().get("tools", [])
             return False, resp.json().get("detail", f"status {resp.status_code}")

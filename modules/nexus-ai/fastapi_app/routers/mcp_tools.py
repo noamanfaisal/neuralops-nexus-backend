@@ -2,11 +2,18 @@
 Step 6 (docs/NUCLEUS-REVAMP.md, handoff change 6) — list a live MCP server's
 tools.
 
-POST /api/v1/mcp/tools/ {url, bearer_token?} → {"tools": [{name, one_line,
-read_only}]}. Nucleus calls this when an admin attaches/saves an external MCP
-server, and from the "Refresh tools" button; the answer lands on the server
-row and later ships back to triggers as MCPServerInternal.tools (the stored
-catalog the approval policy reads).
+POST /api/v1/mcp/tools/ {url?, bearer_token?} or {command?, env?, server_id?}
+→ {"tools": [{name, one_line, read_only}]}. Nucleus calls this when an admin
+attaches/saves an external MCP server, and from the "Refresh tools" button;
+the answer lands on the server row and later ships back to triggers as
+MCPServerInternal.tools (the stored catalog the approval policy reads).
+
+stdio (2026-11-08): a command instead of a url dials by SPAWNING it — the
+spawn spec (allowlisted argv, child-only secret env, SSH key file) comes
+from ai_engine/pydantic_ai_system/tools/stdio_mcp.py, shared with the
+toolset builder. The
+first dial of an npx/uvx server downloads the package, so stdio gets a
+longer leash than HTTP.
 
 read_only comes ONLY from the server's own readOnlyHint annotation; a tool
 without one answers null, and nucleus treats null as a write (asks first) —
@@ -22,11 +29,16 @@ from fastapi_app.routers.trigger import _verify_key
 router = APIRouter(prefix="/api/v1", tags=["mcp"])
 
 DIAL_TIMEOUT_SECONDS = 20
+STDIO_DIAL_TIMEOUT_SECONDS = 90  # npx/uvx fetch the package on first spawn
 
 
 class ToolListRequest(BaseModel):
-    url: str
+    url: str | None = None
     bearer_token: str | None = None
+    # stdio road (either url or command must be given)
+    command: str | None = None
+    env: dict[str, str] | None = None
+    server_id: str | None = None  # names the per-server SSH key file
 
 
 class ToolOut(BaseModel):
@@ -70,8 +82,28 @@ def read_only_hint(annotations) -> bool | None:
 @router.post("/mcp/tools/", response_model=ToolListResponse)
 async def list_mcp_tools(req: ToolListRequest, _: str = Depends(_verify_key)) -> ToolListResponse:
     """One dial: initialize, list tools, hang up. Any failure — unreachable,
-    refused auth, not an MCP server — is one answer: 502 with the reason, so
-    nucleus can show it verbatim next to the Refresh button."""
+    refused auth, not an MCP server, a refused spawn — is one answer: 502
+    with the reason, so nucleus can show it verbatim next to the Refresh
+    button."""
+    if not req.url and not req.command:
+        raise HTTPException(status_code=422, detail="either url or command is required")
+
+    if req.command:
+        import asyncio  # noqa: PLC0415
+
+        from fastmcp.client import Client  # noqa: PLC0415
+
+        from ai_engine.pydantic_ai_system.tools.stdio_mcp import transport_for  # noqa: PLC0415
+        try:
+            transport = transport_for(req.server_id or req.command, req.command, req.env)
+            async with asyncio.timeout(STDIO_DIAL_TIMEOUT_SECONDS):
+                async with Client(transport) as client:
+                    listed = await client.list_tools()
+        except Exception as exc:  # noqa: BLE001 — every dial failure is the same 502 + why
+            raise HTTPException(status_code=502,
+                                detail=f"could not list tools: {type(exc).__name__}: {exc}")
+        return ToolListResponse(tools=_to_tool_out(listed))
+
     headers = {"Authorization": f"Bearer {req.bearer_token}"} if req.bearer_token else {}
     try:
         ClientSession, streamable_http_client, httpx2 = _dial_imports()
@@ -84,10 +116,17 @@ async def list_mcp_tools(req: ToolListRequest, _: str = Depends(_verify_key)) ->
         raise HTTPException(status_code=502,
                             detail=f"could not list tools: {type(exc).__name__}: {exc}")
 
+    return ToolListResponse(tools=_to_tool_out(result.tools))
+
+
+def _to_tool_out(tools_in) -> list[ToolOut]:
+    """One mapping for both roads — the mcp SDK's ListToolsResult.tools and
+    the fastmcp client's stdio list both yield objects with name/
+    description/annotations."""
     tools: list[ToolOut] = []
-    for tool in result.tools:
+    for tool in tools_in:
         read_only = read_only_hint(getattr(tool, "annotations", None))
         description = (tool.description or "").strip()
         one_line = description.splitlines()[0][:200] if description else ""
         tools.append(ToolOut(name=tool.name, one_line=one_line, read_only=read_only))
-    return ToolListResponse(tools=tools)
+    return tools

@@ -387,17 +387,22 @@ def create_mcp_server_standalone(company, data: dict):
 
     project_id = data.pop("project_id")
     client_secret = data.pop("client_secret", None)
+    extra_secrets = data.pop("secrets", None)
 
     project = Project.objects.filter(company=company, id=project_id, is_active=True).first()
     if not project:
         raise ValueError("Project not found.")
 
-    # Launch ruling 2026-10-31: NeuralOps dials HTTP tool servers only until
-    # the runner lands — a stdio row would be saved and then never work.
-    if not data.get("is_internal") and data.get("transport", "http") == "stdio":
-        raise ValueError("NeuralOps connects to tool servers over HTTP for now — "
-                         "servers that run as a local command (npx/uvx) are coming soon. "
-                         "Give the server's https:// address instead.")
+    # stdio landed 2026-11-08 (the 2026-10-31 "HTTP only" launch ruling is
+    # lifted): the engine spawns the row's command itself — allowlisted
+    # argv, child-only secret env, SSH key file; see nexus-ai
+    # ai_engine/pydantic_ai_system/tools/stdio_mcp.py. A stdio row still
+    # needs the command.
+    if (not data.get("is_internal") and data.get("transport", "http") == "stdio"
+            and not (data.get("command") or "").strip()):
+        raise ValueError("A command-line tool server needs its command — e.g. "
+                         "'uvx mcp-server-git', or an ssh line for a server "
+                         "on another machine.")
 
     # Built then saved rather than .create()d, so normalisation lands before
     # the row hits the database and the constraint stays a backstop.
@@ -424,12 +429,38 @@ def create_mcp_server_standalone(company, data: dict):
             % data.get("name")
         )
 
-    # An internal row has no credentials of any kind -- a client_secret sent
-    # alongside one is dropped, not stored.
-    if client_secret and not server.is_internal:
-        server.set_secrets({**server.get_secrets(), "client_secret": client_secret})
-        server.save()
+    # An internal row has no credentials of any kind -- a client_secret or
+    # secrets dict sent alongside one is dropped, not stored.
+    if not server.is_internal:
+        merged = _merged_secret_update(server, client_secret, extra_secrets)
+        if merged is not None:
+            server.set_secrets(merged)
+            server.save()
     return server
+
+
+def _merged_secret_update(server, client_secret, extra_secrets):
+    """The row's new secret dict, or None when the payload carried nothing.
+    `secrets` is write-only (like client_secret) and MERGES over what is
+    stored — sending one key rotates that key alone. A key explicitly sent
+    as empty string is removed, so a secret can be revoked without
+    re-creating the row. Values are coerced to str: they travel as
+    subprocess env vars on the stdio road (MCPServerInternal.secrets)."""
+    if not client_secret and not isinstance(extra_secrets, dict):
+        return None
+    merged = dict(server.get_secrets())
+    if isinstance(extra_secrets, dict):
+        for key, value in extra_secrets.items():
+            name = str(key).strip()
+            if not name:
+                continue
+            if value is None or value == "":
+                merged.pop(name, None)
+            else:
+                merged[name] = str(value)
+    if client_secret:
+        merged["client_secret"] = client_secret
+    return merged
 
 
 def get_mcp_server_standalone(company, server_id: str):
@@ -450,6 +481,7 @@ def update_mcp_server_standalone(company, server_id: str, data: dict):
         return None
 
     client_secret = data.pop("client_secret", None)
+    extra_secrets = data.pop("secrets", None)
     data.pop("project_id", None)      # ownership is fixed at creation
     data.pop("project", None)
 
@@ -465,8 +497,10 @@ def update_mcp_server_standalone(company, server_id: str, data: dict):
     # request.
     _apply_internal_normalisation(server)
 
-    if client_secret and not server.is_internal:
-        server.set_secrets({**server.get_secrets(), "client_secret": client_secret})
+    if not server.is_internal:
+        merged = _merged_secret_update(server, client_secret, extra_secrets)
+        if merged is not None:
+            server.set_secrets(merged)
     server.save()
     return server
 

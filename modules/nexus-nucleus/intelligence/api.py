@@ -136,14 +136,25 @@ def _refresh_server_tools(server) -> tuple[bool, str]:
     Dial the server through the engine and store its tool list on the row
     (fetched at attach/save + the Refresh button — no background syncing,
     owner's ruling 7). (True, "") on success; (False, reason) on a failed
-    dial. Internal rows and non-HTTP transports keep an empty list — that
-    is not an error (stdio tool lists arrive when stdio dialing lands).
+    dial. Internal rows and transports with nothing to dial keep an empty
+    list — that is not an error.
+
+    stdio (landed 2026-11-08): dialed by COMMAND — the engine spawns it with
+    the row's decrypted secrets as child env (SSH_PRIVATE_KEY becomes the
+    engine's key file, never env).
     """
     from chat.nexus_ai import NexusAIClient
 
-    if server.is_internal or server.transport not in ("http", "sse") or not server.url:
+    if server.is_internal:
         return True, ""
-    ok, result = NexusAIClient().list_mcp_tools(server.url, _bearer_for_dial(server))
+    if server.transport == "stdio" and server.command:
+        ok, result = NexusAIClient().list_mcp_tools(
+            None, command=server.command, env=server.get_secrets() or None,
+            server_id=str(server.id))
+    elif server.transport in ("http", "sse") and server.url:
+        ok, result = NexusAIClient().list_mcp_tools(server.url, _bearer_for_dial(server))
+    else:
+        return True, ""
     if not ok:
         return False, str(result)
     server.tools = [

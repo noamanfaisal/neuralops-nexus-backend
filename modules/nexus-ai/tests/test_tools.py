@@ -101,25 +101,35 @@ def test_l1_catalog_server_without_stored_tools_is_one_entry():
     assert entry.tool_id == "mcp:s1" and entry.read_only is None
 
 
-def test_l1_a_stdio_server_is_never_offered_and_never_fails_the_reply():
-    """Launch ruling 2026-10-31: NeuralOps dials HTTP tool servers only. A
-    url-less (stdio) server attached to a persona — even one with no stored
-    tool list, which used to become a server-level entry — is left out of the
-    catalog, and the builder skips it instead of raising (a raise there failed
-    the WHOLE reply). The HTTP server next to it is untouched."""
+def test_l1_stdio_servers_are_catalogued_and_a_bad_row_never_fails_the_reply():
+    """stdio landed 2026-11-08 (the 2026-10-31 "HTTP only" launch ruling is
+    lifted): a url-less server WITH a command is catalogued like any other —
+    the engine spawns it at dial time (allowlisted argv; see
+    ai_engine/pydantic_ai_system/tools/stdio_mcp.py). A row with NEITHER url
+    nor command can never run, so it stays out of the catalog — and the
+    builder still SKIPS a bad stdio row (refused command, dead row in a stale
+    loaded set) instead of raising, because a raise there failed the WHOLE
+    reply. The HTTP server next to them is untouched."""
     from ai_engine.core.specs import LoadedSet
     from ai_engine.pydantic_ai_system.tools.toolset_builder import ToolsetBuilder
 
     stdio = _mcp_server("s-std", "Local Git", None)
     stdio.update(url=None, transport="stdio", command="uvx mcp-server-git")
+    dead = _mcp_server("s-dead", "Broken", None)
+    dead.update(url=None, transport="stdio", command=None)
+    refused = _mcp_server("s-ref", "Refused", None)
+    refused.update(url=None, transport="stdio", command="bash -c anything")  # not allowlisted
     http = _mcp_server("s-gh", "GitHub", [{"name": "search", "description": "Search code", "read_only": True}])
-    persona = _persona_spec(mcp_servers=[stdio, http])
+    persona = _persona_spec(mcp_servers=[stdio, dead, refused, http])
     catalog = ToolRegistry().catalog_for(persona)
-    assert [e.tool_id for e in catalog if e.source_kind == "mcp"] == ["mcp:s-gh/search"]
-    # even if a stale loaded set still names the stdio server, building works
+    assert [e.tool_id for e in catalog if e.source_kind == "mcp"] == \
+        ["mcp:s-std", "mcp:s-ref", "mcp:s-gh/search"]  # the commandless row is out
+    # the refused command, and a dead row a stale loaded set still names,
+    # are skipped quietly — building works and the HTTP tools survive
     caps = ToolsetBuilder().build(
-        LoadedSet(tool_ids=("mcp:s-std", "mcp:s-gh/search"), catalog_hash="h"),
-        catalog + [type(catalog[0])(tool_id="mcp:s-std", model_name="local_git", source_id="s-std",
+        LoadedSet(tool_ids=("mcp:s-std", "mcp:s-ref", "mcp:s-dead", "mcp:s-gh/search"),
+                  catalog_hash="h"),
+        catalog + [type(catalog[0])(tool_id="mcp:s-dead", model_name="broken", source_id="s-dead",
                                     source_kind="mcp", one_line="", read_only=None)],
         persona)
     assert caps  # built, no exception

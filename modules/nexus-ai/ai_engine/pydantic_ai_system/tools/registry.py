@@ -75,9 +75,10 @@ class ToolRegistry:
         # external MCP servers — from nucleus's stored tool lists (change 6)
         slugs: dict[str, str] = {}
         for server in persona.mcp_servers:
-            if not server.get("url"):
-                # stdio (no URL): not dialable yet (launch ruling 2026-10-31) —
-                # never offered to the model, so it can't reach for a dead tool
+            if not server.get("url") and not (server.get("command") or "").strip():
+                # Neither dialable nor spawnable (stdio landed 2026-11-08:
+                # a command is enough now) — never offered to the model, so
+                # it can't reach for a dead tool.
                 continue
             sid = str(server.get("id"))
             slug = server_slug(server.get("name") or sid)

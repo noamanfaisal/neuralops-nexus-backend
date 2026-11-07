@@ -175,6 +175,60 @@ async def test_mcp_dial_sends_bearer_header_on_the_wire(harness, recording_mcp_s
     assert all(value == "Bearer tok-123" for value in seen), seen
 
 
+# ── the stdio road (landed 2026-11-08) ───────────────────────────────────
+
+async def test_stdio_mcp_tool_executes_through_a_spawned_process(harness, monkeypatch):
+    """E2E stdio — a url-less server row is SPAWNED, not dialed: the module
+    builds MCP(local=…) from the row's command, the model calls the prefixed
+    tool, and the real answer crosses the pipe. The row's secrets arrive as
+    the CHILD process's env — env_probe reads FAKE_SECRET there — proving
+    the whole MCPServerInternal.secrets contract end to end."""
+    import sys
+    from pathlib import Path
+    monkeypatch.setenv("MCP_STDIO_ALLOWED_COMMANDS",
+                       f"ssh,npx,uvx,{Path(sys.executable).name}")
+    row = {
+        "id": "s9", "name": "LocalTools", "server_type": "local",
+        "transport": "stdio", "url": None,
+        "command": f"{sys.executable} {Path(__file__).with_name('fake_mcp.py')}",
+        "config": {}, "secrets": {"FAKE_SECRET": "sealed"},
+        "is_first_party": False, "embed_output": False, "needs_reauth": False,
+        "auth_type": "none", "token_env_var": "OAUTH_ACCESS_TOKEN",
+        "tools": [{"name": "env_probe", "description": "env probe", "read_only": True}],
+    }
+    harness.nucleus.persona = make_persona(openai_model(harness), mcp_servers=[row])
+    harness.provider.script.steps = [
+        {"kind": "tool_call", "call_id": "call_s9", "name": "localtools__env_probe",
+         "args": {}},
+        {"kind": "text", "text": "Done."},
+    ]
+    events = await harness.trigger(harness.job(topic_tools=["mcp:s9/env_probe"]))
+    types = [e["type"] for e in events]
+    assert "approval_requested" not in types and types[-1] == "message_done"
+    body = harness.provider.requests[-1]
+    tool_msgs = [m for m in body["messages"] if m.get("role") == "tool"]
+    assert any("env=sealed" in m["content"] for m in tool_msgs)
+
+
+async def test_stdio_mcp_with_a_refused_command_skips_quietly(harness, caplog):
+    """A url-less row whose command is off the allowlist must never fail the
+    reply — the server is skipped with its worded reason and the turn
+    completes on the model alone."""
+    row = {
+        "id": "s8", "name": "BadTools", "server_type": "local",
+        "transport": "stdio", "url": None, "command": "bash -c evil",
+        "config": {}, "secrets": {}, "is_first_party": False,
+        "embed_output": False, "needs_reauth": False, "auth_type": "none",
+        "token_env_var": "OAUTH_ACCESS_TOKEN",
+        "tools": [{"name": "x", "description": "", "read_only": True}],
+    }
+    harness.nucleus.persona = make_persona(openai_model(harness), mcp_servers=[row])
+    harness.provider.script.steps = [{"kind": "text", "text": "No tools needed."}]
+    events = await harness.trigger(harness.job(topic_tools=["mcp:s8/x"]))
+    assert [e["type"] for e in events][-1] == "message_done"
+    assert any("allowlist" in r.getMessage() for r in caplog.records)
+
+
 async def test_mcp_annotation_passthrough_without_stored_list(harness, mcp_server):
     """E2E MCP — Open (c) resolved: a live readOnlyHint reaches the gate.
     The server row carries NO stored tool list (today's nucleus): the whole

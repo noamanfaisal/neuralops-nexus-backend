@@ -277,19 +277,19 @@ CATEGORIES = ["Software", "Data", "Communication", "Documents", "Infrastructure"
 
 
 # Launch ruling 2026-10-31 (owner: "right now we can focus on mcp … streaming
-# http, we can postpone it"): NeuralOps dials HTTP tool servers only — stdio
-# (`npx …` / `uvx …`) waits for the runner (docs/MISSING.md). A stdio entry
-# is still listed, so people see what is coming, but marked unavailable and
-# the app shows it as "Coming soon" instead of a tile that fails on use.
-COMING_SOON = ("Coming soon — this server runs as a local command, and NeuralOps "
-               "connects to tool servers over HTTP for now.")
-
-
+# http, we can postpone it") was LIFTED 2026-11-08: the runner landed, and
+# stdio entries (`npx …` / `uvx …`) are spawned by the engine itself — see
+# nexus-ai ai_engine/pydantic_ai_system/tools/stdio_mcp.py for the allowlist
+# and key handling.
 def _with_availability(entry: dict) -> dict:
+    # stdio landed 2026-11-08 (the engine spawns allowlisted commands —
+    # nexus-ai ai_engine/pydantic_ai_system/tools/stdio_mcp.py), so every
+    # entry is addable now.
+    # The function stays so a future entry can gate itself with a worded
+    # reason again.
     out = dict(entry)
-    available = out.get("transport") != "stdio"
-    out["available"] = available
-    out["unavailable_reason"] = None if available else COMING_SOON
+    out["available"] = True
+    out["unavailable_reason"] = None
     return out
 
 

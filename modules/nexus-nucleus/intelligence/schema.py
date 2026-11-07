@@ -155,6 +155,12 @@ class MCPServerIn(Schema):
     auth_type: str = "static_secrets"
     oauth_config: Optional[dict] = None
     client_secret: Optional[str] = None  # write-only -- folded into secrets_encrypted
+    # Write-only, like client_secret: a dict of secret values merged into
+    # secrets_encrypted (empty-string value = remove that key). stdio servers
+    # get the whole stored dict as subprocess env; SSH_PRIVATE_KEY is special
+    # -- the engine writes it to a 0600 key file and substitutes the literal
+    # {SSH_KEY_FILE} in the command. Never returned by any endpoint.
+    secrets: Optional[dict] = None
     # REMOVED: secret_ref
 
 
@@ -178,6 +184,7 @@ class MCPServerPatchIn(Schema):
     auth_type: Optional[str] = None
     oauth_config: Optional[dict] = None
     client_secret: Optional[str] = None
+    secrets: Optional[dict] = None  # write-only merge; "" value removes a key
 
 
 class MCPServerOut(Schema):
@@ -490,7 +497,9 @@ class MCPCatalogEntryOut(Schema):
     # three only). Non-secret by construction — a public client_id, endpoints,
     # scopes, redirect_mode. None on every other entry.
     oauth_preset: Optional[dict] = None
-    # Launch ruling 2026-10-31: stdio entries are listed but not addable yet.
+    # stdio landed 2026-11-08: every catalog entry is addable now. The pair
+    # stays in the schema so a future entry can still be gated with a worded
+    # reason (and older frontends keep rendering).
     available: bool = True
     unavailable_reason: Optional[str] = None
 

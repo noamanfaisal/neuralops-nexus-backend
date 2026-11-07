@@ -25,9 +25,12 @@ are built, not only the loaded ones; the gate hides tools outside the topic's
 set (defer_loading) and ToolSearch(strategy="keywords") lets the model
 discover them — their first use then asks the person once.
 
-stdio MCP servers are NOT built in this pass: the pinned MCP(local=...) shape
-is unverified for argv lists — flagged in the doc. HTTP/SSE servers are fully
-supported.
+stdio MCP servers are built through MCP(local=MCPToolset(StdioTransport))
+(verified live in the engine container 2026-11-08: tools listed and called,
+child env delivered). The spawn spec — allowlisted argv, child-only secret
+env, SSH key materialized to a 0600 file — comes from
+ai_engine/pydantic_ai_system/tools/stdio_mcp.py, shared with the refresh
+dial (mcp_tools.py).
 """
 from __future__ import annotations
 
@@ -44,11 +47,13 @@ from pydantic_ai.capabilities import (
     WebFetch,
     WebSearch,
 )
+from pydantic_ai.mcp import MCPToolset
 from pydantic_ai_harness import ClearToolResults, DeduplicateFileReads, SummarizingCompaction, TieredCompaction
 from pydantic_ai_harness.filesystem import FileSystem
 from pydantic_ai_harness.shell import Shell
 
 from ai_engine.core.specs import LoadedSet, PersonaSpec, ToolCatalogEntry
+from ai_engine.pydantic_ai_system.tools.stdio_mcp import transport_for
 from ai_engine.pydantic_ai_system.tools.approval_gate import ApprovalGate
 from ai_engine.pydantic_ai_system.tools.approval_policy import ApprovalPolicy, ToolSource
 from ai_engine.pydantic_ai_system.tools.registry import normalize_key, server_slug
@@ -141,18 +146,28 @@ class ToolsetBuilder:
             if not whole_server and not tool_names:
                 continue
             if not server.get("url"):
-                # stdio waits for the runner (launch ruling 2026-10-31: HTTP
-                # only for now). Skipped with a warning — one url-less server
-                # must never fail the whole reply (it used to raise here).
-                log.warning("stdio MCP server %r skipped — NeuralOps dials HTTP tool "
-                            "servers only for now", server.get("name"))
-                continue
-            mcp = MCP(
-                url=server["url"],
-                id=sid,
-                authorization_token=_bearer_token(server),
-                allowed_tools=tool_names or None,  # None = whole server
-            )
+                # stdio (the runner landed 2026-11-08): spawn spec from the
+                # shared module — a malformed row is skipped with its worded
+                # reason; one bad server must never fail the whole reply.
+                try:
+                    transport = transport_for(sid, server.get("command") or "",
+                                              server.get("secrets"))
+                except (ValueError, ImportError) as exc:
+                    log.warning("stdio MCP server %r skipped — %s",
+                                server.get("name"), exc)
+                    continue
+                mcp = MCP(
+                    local=MCPToolset(transport, id=f"mcp-stdio-{sid}"),
+                    id=sid,
+                    allowed_tools=tool_names or None,  # None = whole server
+                )
+            else:
+                mcp = MCP(
+                    url=server["url"],
+                    id=sid,
+                    authorization_token=_bearer_token(server),
+                    allowed_tools=tool_names or None,  # None = whole server
+                )
             slug = server_slug(server.get("name") or sid)
             # PrefixTools joins names as f"{prefix}_{name}" (trial E, 2026-10-12,
             # pinned 2.55) — so "{slug}_" yields the catalog's "{slug}__{tool}".

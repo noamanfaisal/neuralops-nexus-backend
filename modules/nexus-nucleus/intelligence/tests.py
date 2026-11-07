@@ -516,26 +516,55 @@ class CatalogueTests(MentionRightFixture):
                 self.assertNotIn(leak, blob, e["id"])
         self.assertEqual(len({e["id"] for e in rows}), len(rows))  # ids are unique
 
-    def test_launch_is_http_only_stdio_tiles_say_coming_soon_and_cannot_be_added(self):
-        """Launch ruling 2026-10-31 (owner: "focus on mcp … streaming http,
-        we can postpone it"): NeuralOps can't launch stdio servers yet, so a
-        stdio tile is listed as unavailable with a worded reason, after every
-        available one; GitHub is now its HOSTED http server; and a stdio
-        server can't be created through the API either (it would never run)."""
+    def test_stdio_landed_every_tile_is_addable_and_a_stdio_row_saves(self):
+        """stdio landed 2026-11-08 (the 2026-10-31 "HTTP only" launch ruling
+        is lifted): every catalog tile is addable, GitHub stays its HOSTED
+        http server, and a stdio server row saves through the API — the
+        engine now spawns its command (allowlisted argv; nexus-ai
+        ai_engine/pydantic_ai_system/tools/stdio_mcp.py). A stdio row
+        without a command is still
+        refused: it could never run."""
         rows = self.call("get", "/api/v1/mcp-catalog/", self.sara).json()
         for e in rows:
-            self.assertEqual(e["available"], e["transport"] != "stdio", e["id"])
-            self.assertEqual(bool(e["unavailable_reason"]), not e["available"], e["id"])
-        flags = [e["available"] for e in rows]
-        self.assertEqual(flags, sorted(flags, reverse=True))  # available ones first
+            self.assertTrue(e["available"], e["id"])
+            self.assertIsNone(e["unavailable_reason"], e["id"])
         github = next(e for e in rows if e["id"] == "github")
-        self.assertTrue(github["available"])
         self.assertEqual((github["transport"], github["url"]), ("http", "https://api.githubcopilot.com/mcp/"))
         r = self.call("post", "/api/v1/mcp-servers/", self.owner, {
             "name": "Local git", "project_id": str(self.p1.id), "server_type": "local",
             "transport": "stdio", "command": "uvx mcp-server-git"})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["transport"], "stdio")
+        self.assertEqual(r.json()["command"], "uvx mcp-server-git")
+        r = self.call("post", "/api/v1/mcp-servers/", self.owner, {
+            "name": "No command", "project_id": str(self.p1.id), "server_type": "local",
+            "transport": "stdio"})
         self.assertEqual(r.status_code, 400, r.content)
-        self.assertIn("over HTTP for now", r.json()["detail"])
+        self.assertIn("needs its command", r.json()["detail"])
+
+    def test_mcp_secrets_are_write_only_and_merge_by_key(self):
+        """The `secrets` payload (stdio road, 2026-11-08): stored encrypted,
+        never echoed by any endpoint, merged key-by-key on PATCH — and an
+        empty-string value removes that one key (revoking a secret without
+        re-creating the row)."""
+        from nucleus.models import MCPServer
+        r = self.call("post", "/api/v1/mcp-servers/", self.owner, {
+            "name": "SSH bridge", "project_id": str(self.p1.id), "server_type": "remote",
+            "transport": "stdio",
+            "command": "ssh -i {SSH_KEY_FILE} user@host uvx mcp-shell-server",
+            "secrets": {"SSH_PRIVATE_KEY": "KEYMATERIAL", "TOKEN": "t1"}})
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertNotIn("secrets", body)                      # write-only
+        self.assertNotIn("KEYMATERIAL", r.content.decode())    # never echoed
+        server = MCPServer.objects.get(id=body["id"])
+        self.assertEqual(server.get_secrets(),
+                         {"SSH_PRIVATE_KEY": "KEYMATERIAL", "TOKEN": "t1"})
+        r = self.call("patch", f"/api/v1/mcp-servers/{body['id']}/", self.owner,
+                      {"secrets": {"TOKEN": "t2", "SSH_PRIVATE_KEY": ""}})
+        self.assertEqual(r.status_code, 200, r.content)
+        server.refresh_from_db()
+        self.assertEqual(server.get_secrets(), {"TOKEN": "t2"})
 
     def test_the_persona_catalogue_pre_fills_a_real_create_dialog(self):
         from intelligence import persona_catalog
