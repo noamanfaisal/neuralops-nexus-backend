@@ -220,7 +220,7 @@ RUN groupadd -g $GID nexus && useradd -m -u $UID -g $GID -s /bin/bash nexus
 ENV SUPABASE_URL="https://xgfsxikypxjhqlutiepw.supabase.co" \
   SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZnN4aWt5cHhqaHFsdXRpZXB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyNDg3MDcsImV4cCI6MjA5NzgyNDcwN30.2_OUNTHuKSeDJh6S-aUW16IqvDTmew8ZcFuKvFkt3Dk" \
   NEURALOPS_PORTAL_URL="https://neuralopsnexus.ai/add_code" \
-  NEURALOPS_VERSION="1.1.6"
+  NEURALOPS_VERSION="1.1.7"
 
 COPY --from=nucleus-builder /opt/venv/nucleus-env /opt/venv/nucleus-env
 COPY --from=transport-builder /app/nexus-transport /usr/local/bin/nexus-transport
