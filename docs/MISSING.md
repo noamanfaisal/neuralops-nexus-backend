@@ -1963,3 +1963,43 @@ capabilities still show "Coming soon". The API already returns
   approval — the run's state …" on a failed pause POST (test_approvals
   pins it), and chat/reasons.py maps that wording through to the bubble
   instead of the provider-error line (chat/tests_reasons.py).
+
+- **FEATURE (designed with the owner 2026-11-08, build on his word): the
+  project console — a save/load data bus over the project's MCPs, no model
+  involved.** Owner's problem: MCP servers cannot talk to each other (the
+  protocol is hub-and-spoke), so moving one server's output into another —
+  "write all GitHub issues to a file", "feed a saved file into neo4j" —
+  burns model tokens and context today. Decisions, settled in discussion:
+  - It is a DATA BUS, not a viewer: save and load are the verbs; display is
+    an afterthought (truncated head when not redirected).
+  - One grammar, deliberately tiny — the grammar IS the sandbox:
+    `server.tool({json args})` with ONE level of nesting
+    (`neo4j.import(github.get_issues({...}))`), `> /path` saves the full
+    result into the PROJECT DEFAULT FOLDER (redirect implies full write,
+    capped by size), `@/path` inlines a project-folder file into a tool's
+    argument. No shell, no URLs, no host access — inexpressible, not
+    forbidden. NOTE: MCP has no universal pagination, so "full result" is
+    the tool's single reply; paging stays the tool's own argument.
+  - The ENGINE executes, exactly as it does for the model, through the same
+    dial layer (transport_for + fastmcp client, stdio and HTTP alike):
+    the model only ever CHOOSES calls, so removing the model costs nothing.
+    Zero tokens, deterministic, no approval gate (the human IS the caller),
+    but every call logged like a tool call with tokens = 0.
+  - Advanced users only, double-gated: a project-settings toggle
+    (`console_enabled`, off by default) AND a per-user `mcp.playground`
+    right. Invisible to everyone else.
+  - v1 client is a CLI — `uvx neuralops-console <server url>` — login with
+    the normal email/password (same JWT as the web app; personal API tokens
+    are a later feature for CI). NOT inside chat (owner: results would
+    distort the topic's model context), NOT a browser tab (later, only if
+    non-devs ask), NOT ssh (a daemon + open port on every install; maybe a
+    second transport someday).
+  - Out of scope v1: pipes, saved pipelines/recipes, scheduler, visual
+    mapping, stdio keep-alive across calls (each call may spawn fresh).
+  Changes when built: nexus-ai `fastapi_app/routers/console.py` (parser +
+  execute + path-sandboxed project-folder read/write + size cap, ~12 tests
+  against fake_mcp); nucleus `console_enabled` on the project (migration) +
+  `mcp.playground` right + gated proxy + audit row; frontend one toggle in
+  project settings; new `neuralops-console` package on PyPI. Estimate ~5
+  sessions. Until then the courier is a persona (filesystem + the other MCP
+  mounted) or the shell capability for big dumps.
