@@ -446,8 +446,14 @@ EOF
 
   # The engine runs as UID 1000 and writes project files here.
   if [ "$OS_FAMILY" = "linux" ] || [ "$OS_FAMILY" = "wsl" ]; then
+    # Found live 2026-11-08 (Contabo): with no sudo in play (a root install,
+    # which includes every demo VM's cloud-init) this chown was SKIPPED, the
+    # projects folder stayed root-owned, and the first "create project"
+    # failed with a 500 (nucleus runs as uid 1000 and could not mkdir).
     if [ -n "$SUDO" ]; then
       $SUDO chown -R 1000:1000 "$NEURALOPS_DIR/projects" 2>/dev/null || true
+    else
+      chown -R 1000:1000 "$NEURALOPS_DIR/projects" 2>/dev/null || true
     fi
   fi
   ok "Projects folder ready"
