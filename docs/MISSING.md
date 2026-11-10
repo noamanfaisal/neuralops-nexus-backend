@@ -2003,3 +2003,28 @@ capabilities still show "Coming soon". The API already returns
   project settings; new `neuralops-console` package on PyPI. Estimate ~5
   sessions. Until then the courier is a persona (filesystem + the other MCP
   mounted) or the shell capability for big dumps.
+
+- **NEW-STYLE CONNECTORS — DEPLOYABLE MCPs (owner, 2026-11-10: "we need to
+  make sure that we can run some mcp on runpod or give user a chance to run
+  it on local … we will create a seperate repo for csv mcp (minio + duckdb
+  + caddy to download files etc)").** Today's catalog tiles only CONNECT to
+  servers that already run somewhere; a DEPLOYABLE connector is a tile that
+  also knows how to BE RUN. Each one lives in its own public repo as a
+  compose stack, and the add-flow offers two roads:
+  - **RunPod / any cloud box** — one-command install of the stack; it comes
+    up with a URL and a minted token ready to paste into the add-MCP
+    dialog (init-secrets pattern from the main installer: generated on
+    first boot, never shipped);
+  - **local** — the user runs the same compose on their own machine and
+    registers it over the LAN, or through the ssh/stdio road (1.1.7) when
+    the engine must reach a box with no public address.
+  FIRST DEPLOYABLE: **csv-mcp, its own repo** — MinIO (file store) +
+  DuckDB (analytics engine) + the MCP server + a caddy that serves result
+  files for download. Grows out of the DATA POD work above (code built
+  2026-10-30, "one runpod with duckdb + minio to handle large csv") — that
+  pod becomes the new repo's first content, repackaged as a product any
+  NeuralOps user can deploy. Open design questions for the ruling when
+  this starts: how the catalog tile carries the deploy story (README link
+  vs an in-app "deploy it" sheet with the one command); whether deployable
+  tiles are marked distinctly from hosted ones; and the token hand-off
+  (the install prints it once vs the tile's Secrets box flow).
