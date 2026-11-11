@@ -879,7 +879,7 @@ lesson 14) and rebuild the image — fold into the next image build.
   this: nucleus 475 · frontend 1141 · migrations through 0041 (engine
   unchanged).
 
-## 9b. GitHub: choose repositories like Vercel (owner, 2026-11-03) — NOT BUILT
+## 9b. GitHub: choose repositories like Vercel (owner, 2026-11-03) — BUILT 2026-11-11 (both parts, ship in 1.1.8)
 
 **Found live 2026-11-02/03 on Contabo (1.1.3 → 1.1.4).** "Connect with
 NeuralOps" for GitHub is an **OAuth App** (client id `Ov23li…`, tokens
@@ -894,8 +894,24 @@ server ("Use my own token" → Static secret).
 
 The owner wants the Vercel experience. Two parts:
 
-1. **Move the vendor app to a GitHub App** (~half a day to a day of code +
-   tests, plus the owner's ~15 min on GitHub). Owner: create the GitHub App
+1. ~~Move the vendor app to a GitHub App~~ **BUILT 2026-11-11 (commit
+   11649de + frontend 0f9b927).** The App: `neuralops-nexus-ai` under
+   mapax-io, client id `Iv23liZYiPFoomSqRbzK`, callback = the portal relay,
+   "Request user authorization (OAuth) during installation" ON, expiring
+   user tokens ON; its client id/secret swapped into the portal's
+   oauth-exchange secrets (the function itself needed NO change — same
+   token endpoint, refresh grant already there). oauth_client.
+   build_authorize_url: a preset with `app_slug` goes to
+   `github.com/apps/<slug>/installations/new?state=…` (GitHub's own
+   account + "All repositories / Only select repositories" picker); that
+   road carries no PKCE, so the state holds an empty verifier and the
+   exchange sends none. Catalog preset filled (scopes [] — Apps ignore
+   scopes). Frontend: "manage repositories on GitHub" link on connected
+   rows with app_slug. Tests 16/16 (install road + tile). Contabo's
+   GitHub row pointed at the App; VERIFY LIVE on first Reconnect: state
+   carries through installations/new → relay → callback, ghu_ token
+   stored with refresh_token + expires_at, refresh works via portal.
+   Original plan — owner: create the GitHub App
    (repo permissions: Contents, Issues, Pull requests, Metadata; callback =
    the portal relay; "Request user authorization (OAuth) during
    installation" on; expiring user tokens on), put its client id/secret in
