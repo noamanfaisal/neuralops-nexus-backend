@@ -910,13 +910,21 @@ The owner wants the Vercel experience. Two parts:
    `state` through to the callback.
    Limit (same as Vercel): the repo choice is per GitHub account, not per
    connection — two servers on one account see the same chosen repos.
-2. **Per-server repo list, enforced by NeuralOps** (~1 day): a
-   "Repositories this server may use" field on the MCP server (owner/repo
-   entries; empty = all the token can reach), checked by the ApprovalGate on
-   every GitHub tool call that names an owner/repo — a call outside the list
-   is refused with a worded reason. Gives GitHub2 → repo-a, GitHub3 → repo-b
-   on the same account. Tests: allowed/refused/empty-list/search tools that
-   take no repo.
+2. ~~Per-server repo list, enforced by NeuralOps~~ **BUILT 2026-11-11
+   (commit c5dcc6f + frontend 11646ee), ships in 1.1.8.** MCPServer.
+   allowed_repos (migration 0048; normalize_allowed_repos — lowercase,
+   pasted github.com URL forgiven, a typo REFUSES the save; PATCH [] clears,
+   None keeps) → MCPServerInternal → ToolSource.allowed_repos → the
+   ApprovalGate refuses any call whose args name an outside repo (named_repo
+   reads owner+repo / repository / repo_full_name) with a worded result —
+   reads included, unattended included, BEFORE any level logic, no approval
+   overrides it. Frontend: "Repositories this server may use" in both MCP
+   dialogs. Tests: engine tests/test_repo_fence.py (4 — allowed/refused/
+   case-fold/empty-list/no-repo/builder ride-along), nucleus
+   intelligence/tests_repo_fence.py (4); suites green at commit time.
+   Original scope: a "Repositories this server may use" field, checked by
+   the ApprovalGate on every GitHub tool call that names an owner/repo.
+   Gives GitHub2 → repo-a, GitHub3 → repo-b on the same account.
 
 Also from the same session, smaller (1.1.5 candidates):
 - **Reconnect success is silent + the popup can stay open.** After GitHub's
