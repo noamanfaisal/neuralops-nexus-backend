@@ -357,10 +357,48 @@ class OAuthRoadsApiTests(MentionRightFixture):
         qs = parse_qs(urlsplit(oauth_client.build_authorize_url(other, "http://x")).query)
         self.assertNotIn("prompt", qs)
 
+    def test_a_github_app_preset_connect_goes_through_the_install_road(self):
+        """9b part 1 (the Vercel experience): a preset carrying app_slug sends
+        Connect to github.com/apps/<slug>/installations/new — GitHub's own
+        repository picker — with the signed state and NOTHING else (that road
+        carries no PKCE challenge, so the state holds no verifier and the
+        exchange later sends none). A preset without app_slug is untouched."""
+        from urllib.parse import parse_qs, urlsplit
+
+        from django.core import signing
+        app = self._server(
+            client_id="Iv1.fakefakefake", app_slug="neuralops-nexus",
+            authorize_endpoint="https://github.com/login/oauth/authorize",
+            token_endpoint="https://github.com/login/oauth/access_token",
+            scopes=[], redirect_mode="portal_relay",
+            exchange_mode="portal", exchange_provider="github",
+        )
+        url = oauth_client.build_authorize_url(app, "http://x")
+        parts = urlsplit(url)
+        self.assertEqual(parts.netloc, "github.com")
+        self.assertEqual(parts.path, "/apps/neuralops-nexus/installations/new")
+        qs = parse_qs(parts.query)
+        self.assertEqual(sorted(qs), ["state"])  # state alone — no PKCE params
+        state = signing.loads(qs["state"][0], salt="mcp-oauth-state", max_age=600)
+        self.assertEqual(state["server_id"], str(app.id))
+        self.assertEqual(state["code_verifier"], "")  # exchange will send none
+
+        # the same row without app_slug = the old OAuth-App road, untouched
+        plain_cfg = {k: v for k, v in app.oauth_config.items() if k != "app_slug"}
+        app.oauth_config = {**plain_cfg, "scopes": ["repo"]}
+        app.save(update_fields=["oauth_config"])
+        plain_url = oauth_client.build_authorize_url(app, "http://x")
+        self.assertIn("github.com/login/oauth/authorize", plain_url)
+        self.assertIn("code_challenge=", plain_url)
+
     def test_the_github_tile_carries_the_vendor_app_id(self):
+        """The tile is the GITHUB APP now (mapax-io/neuralops-nexus-ai,
+        2026-11-11): its client id and slug ride the preset, so every new row
+        connects through GitHub's own repository picker."""
         r = self.call("get", "/api/v1/mcp-catalog/", self.sara)
         github = next(e for e in r.json() if e["id"] == "github")
-        self.assertEqual(github["oauth_preset"]["client_id"], "Ov23liTRtfeWiJ03y4Gp")
+        self.assertEqual(github["oauth_preset"]["client_id"], "Iv23liZYiPFoomSqRbzK")
+        self.assertEqual(github["oauth_preset"]["app_slug"], "neuralops-nexus-ai")
 
     def test_a_refused_portal_exchange_is_worded_and_the_refresh_rides_the_portal_too(self):
         """Road 2b — the two failure/refresh halves: a portal refusal surfaces

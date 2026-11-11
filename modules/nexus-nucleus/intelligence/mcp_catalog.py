@@ -48,14 +48,25 @@ MCP_CATALOG = [
         # WP4): the install sends the code there, only the portal holds the
         # secret. Connectable once the vendor app's client_id lands here.
         "oauth_preset": {
-            # The vendor "NeuralOps" OAuth App (owner, 2026-10-31) -- PUBLIC id;
-            # its secret lives only on the portal's oauth-exchange function.
-            # GitHub OAuth Apps issue NON-expiring tokens with no refresh token
-            # (oauth_client.has_usable_token counts that as connected).
-            "client_id": "Ov23liTRtfeWiJ03y4Gp",
+            # 9b part 1 — the GITHUB APP road (the Vercel experience): when
+            # app_slug is set, Connect goes to github.com/apps/<slug>/
+            # installations/new (GitHub's own "All repositories / Only select
+            # repositories" picker; "Request user authorization during
+            # installation" must be ON on the App) and the App's client_id
+            # replaces the OAuth App's below. App user tokens (ghu_) expire
+            # in 8 h WITH a refresh token — refresh_if_needed already renews
+            # them through the portal; the portal's GITHUB_CLIENT_ID/SECRET
+            # must be swapped to the App's at the same time. Apps IGNORE
+            # scopes (permissions live on the App). Until app_slug is filled,
+            # everything below is the old OAuth App and keeps working as is.
+            # The "NeuralOps Nexus" GitHub App under mapax-io (owner created it
+            # 2026-11-11, replacing the OAuth App Ov23liTRtfeWiJ03y4Gp — rows
+            # connected under that app keep working until reconnected).
+            "app_slug": "neuralops-nexus-ai",
+            "client_id": "Iv23liZYiPFoomSqRbzK",
             "authorize_endpoint": "https://github.com/login/oauth/authorize",
             "token_endpoint": "https://github.com/login/oauth/access_token",
-            "scopes": ["repo", "read:org"],
+            "scopes": [],  # GitHub Apps ignore scopes — permissions live on the App
             "authorize_params": {},
             "redirect_mode": "portal_relay",
             "exchange_mode": "portal",

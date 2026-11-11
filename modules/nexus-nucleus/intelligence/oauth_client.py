@@ -76,7 +76,14 @@ def build_authorize_url(server, frontend_origin: str) -> str:
     signed) and this install's server_url (for the portal relay's bounce).
     """
     cfg = server.oauth_config or {}
-    code_verifier = generate_token(48)
+    # 9b part 1 (the Vercel experience): a GITHUB APP preset carries app_slug,
+    # and Connect goes to the INSTALL road — GitHub itself shows the "All
+    # repositories / Only select repositories" picker, and with "Request user
+    # authorization (OAuth) during installation" ON it continues to the relay
+    # callback with code+state like any authorize. That road carries NO PKCE
+    # challenge, so the state carries no verifier and the exchange sends none.
+    app_slug = str(cfg.get("app_slug") or "").strip()
+    code_verifier = "" if app_slug else generate_token(48)
     state = signing.dumps(
         {
             "server_id": str(server.id),
@@ -86,6 +93,10 @@ def build_authorize_url(server, frontend_origin: str) -> str:
         },
         salt=_SIGNING_SALT,
     )
+    if app_slug:
+        from urllib.parse import quote, urlencode
+        return (f"https://github.com/apps/{quote(app_slug)}/installations/new?"
+                + urlencode({"state": state}))
     client = OAuth2Client(
         client_id=cfg["client_id"],
         scope=" ".join(cfg.get("scopes", [])),
