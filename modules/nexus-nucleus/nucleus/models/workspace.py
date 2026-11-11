@@ -64,6 +64,16 @@ class Project(TenantOperationModel):
         help_text="USD per calendar month; personas here stop answering once the month's estimated spend reaches it.",
     )
 
+    # PROJECT CONSOLE (v1, docs/MISSING.md "project console"): the data-bus
+    # REPL — call the project's MCP tools directly from a CLI, pipe results
+    # through the project folder, no model involved. OFF by default; a
+    # project.update holder flips it, and every line is ALSO gated on the
+    # caller's mcp.playground right — two gates, checked per request.
+    console_enabled = models.BooleanField(
+        default=False,
+        help_text="Allow the project console (the CLI data bus over this project's MCP servers).",
+    )
+
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         through="ProjectMember",

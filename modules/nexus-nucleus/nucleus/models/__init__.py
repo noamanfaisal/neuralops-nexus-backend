@@ -24,6 +24,7 @@ from .intelligence import (
     PersonaDeepModel,
     PersonaFallbackModel,
     Routine,
+    ConsoleLog,
     AIRequestLog,
 )
 

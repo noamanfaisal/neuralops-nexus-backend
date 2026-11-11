@@ -173,8 +173,15 @@ class ToolsetBuilder:
             # pinned 2.55) — so "{slug}_" yields the catalog's "{slug}__{tool}".
             wrapper_id = f"prefixed-{sid}"
             capabilities.append(PrefixTools(mcp, prefix=f"{slug}_", id=wrapper_id))
+            # 9b part 2: the row's repository allow-list — lowercased here,
+            # once, so the gate's compare is a plain set lookup. Empty or
+            # absent (an older nucleus) = no fence.
+            allowed_repos = tuple(sorted({str(r).strip().lower()
+                                          for r in (server.get("allowed_repos") or [])
+                                          if str(r).strip()}))
             sources[wrapper_id] = ToolSource(kind="mcp", cap_key=f"mcp:{sid}",
-                                             source_id=sid, slug=slug)
+                                             source_id=sid, slug=slug,
+                                             allowed_repos=allowed_repos)
 
         # ── the gate, then ToolSearch (item 2, decision 4) ─────────────────
         if capabilities:

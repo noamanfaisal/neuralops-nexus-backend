@@ -332,7 +332,8 @@ SPEND_LIMIT_MAX = 1_000_000
 
 def update_project(project, user, *, brief: str | None = None, description: str | None = None,
                    default_router_model_id: str | None = None, clear_default_router: bool = False,
-                   spend_limit_monthly=None, clear_spend_limit: bool = False):
+                   spend_limit_monthly=None, clear_spend_limit: bool = False,
+                   console_enabled: bool | None = None):
     """
     Edit a project's brief, description and/or default router. Whitespace
     around the brief is trimmed; over the cap is refused before anything is
@@ -387,6 +388,12 @@ def update_project(project, user, *, brief: str | None = None, description: str 
             raise ValueError("The spend limit is dollars per month: more than 0, at most 1,000,000.")
         project.spend_limit_monthly = limit
         fields.append("spend_limit_monthly")
+    # The project console switch (v1): None = not sent, keeps what is there.
+    if console_enabled is not None:
+        project.console_enabled = bool(console_enabled)
+        fields.append("console_enabled")
+        logger.info("[console] project=%s enabled=%s by user=%s",
+                    project.id, project.console_enabled, user.id)
     if fields:
         project.save(update_fields=fields + ["updated_at"])
     return project

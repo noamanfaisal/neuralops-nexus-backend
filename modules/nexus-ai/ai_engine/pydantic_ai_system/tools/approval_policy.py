@@ -54,6 +54,37 @@ DENIED = (
     "The person declined this call. It did not run and nothing changed. Say so "
     "plainly and do not show any output for it; explain, or find another way."
 )
+# 9b part 2 (owner, 2026-11-03): a server with a repository allow-list refuses
+# calls — reads included, an outside read leaks data — that name any other
+# repo. Worded like the other refusals: the model must know it did NOT run.
+REPO_OUTSIDE = (
+    "This server may only act on these repositories: {allowed}. The call named "
+    "{named}, which is not on that list, so it did not run and nothing "
+    "changed. Say so plainly; use a server that is allowed to reach {named}, "
+    "or ask an admin to widen this server's repository list."
+)
+
+
+def named_repo(args: object) -> str | None:
+    """The owner/repo a GitHub-shaped tool call names, or None when it names
+    none (search tools and the like — those always run). Reads the common
+    spellings: owner+repo as separate params (the GitHub MCP server's shape),
+    or a single repo/repository/repo_full_name holding "owner/name"."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args or "{}")
+        except ValueError:
+            return None
+    if not isinstance(args, Mapping):
+        return None
+    owner, repo = args.get("owner"), args.get("repo")
+    if (isinstance(owner, str) and owner and isinstance(repo, str) and repo
+            and "/" not in repo):
+        return f"{owner}/{repo}"
+    for value in (repo, args.get("repository"), args.get("repo_full_name")):
+        if isinstance(value, str) and value.count("/") == 1:
+            return value
+    return None
 
 
 def args_preview(args: object) -> str:
@@ -78,6 +109,10 @@ class ToolSource:
     cap_key: str     # "filesystem" | "shell" | ... | "mcp:<server_id>"
     source_id: str   # native key, or the MCP server id
     slug: str = ""   # MCP only: the model-name prefix ("github")
+    # 9b part 2: the row's "repositories this server may use" — lowercase
+    # owner/repo entries; empty = no fence. The gate refuses any call (reads
+    # included) whose args name a repo outside it.
+    allowed_repos: tuple[str, ...] = ()
 
 
 class ApprovalPolicy:

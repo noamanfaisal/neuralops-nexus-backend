@@ -100,7 +100,7 @@ async def test_refresh_dial_spawns_and_lists_tools(monkeypatch):
         ToolListRequest(command=f"{sys.executable} {FAKE_MCP}", server_id="dial-1"),
         _="key")
     by_name = {t.name: t for t in resp.tools}
-    assert set(by_name) == {"search", "create_issue", "env_probe"}
+    assert set(by_name) == {"search", "create_issue", "env_probe", "make_payload"}
     assert by_name["search"].read_only is True        # annotation survives the pipe
     assert by_name["create_issue"].read_only is None  # unlabeled stays unknown
 

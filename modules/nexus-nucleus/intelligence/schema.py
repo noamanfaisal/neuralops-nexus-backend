@@ -161,6 +161,10 @@ class MCPServerIn(Schema):
     # -- the engine writes it to a 0600 key file and substitutes the literal
     # {SSH_KEY_FILE} in the command. Never returned by any endpoint.
     secrets: Optional[dict] = None
+    # 9b part 2: "Repositories this server may use" — owner/repo entries,
+    # normalised lowercase server-side; [] (the default) = every repo the
+    # token reaches. Enforced by the engine on every repo-naming tool call.
+    allowed_repos: list[str] = []
     # REMOVED: secret_ref
 
 
@@ -185,6 +189,8 @@ class MCPServerPatchIn(Schema):
     oauth_config: Optional[dict] = None
     client_secret: Optional[str] = None
     secrets: Optional[dict] = None  # write-only merge; "" value removes a key
+    # None = not sent; [] = deliberately clear the repository fence.
+    allowed_repos: Optional[list[str]] = None
 
 
 class MCPServerOut(Schema):
@@ -225,6 +231,8 @@ class MCPServerOut(Schema):
     # — fetched at attach/save and from POST /mcp-servers/{id}/tools/refresh/.
     # read_only null = unlabeled = treated as a write (asks first).
     tools: list = []
+    # 9b part 2: the repository fence; [] = every repo the token reaches.
+    allowed_repos: list[str] = []
 
 
 class MCPServerRef(Schema):

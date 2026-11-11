@@ -35,8 +35,10 @@ from pydantic_ai.exceptions import SkipToolExecution
 from ai_engine.core.specs import ToolCatalogEntry
 from ai_engine.pydantic_ai_system.tools.approval_policy import (
     REFUSED_UNATTENDED,
+    REPO_OUTSIDE,
     ApprovalPolicy,
     ToolSource,
+    named_repo,
 )
 
 
@@ -77,6 +79,15 @@ class ApprovalGate(AbstractCapability):
         return out
 
     async def before_tool_execute(self, ctx, *, call, tool_def, args):
+        # 9b part 2: the repository fence FIRST — it holds whatever the level
+        # says (reads included: an outside read leaks data), interactive or
+        # not, and no approval can override it. Only an admin edit can.
+        source = self._sources.get(tool_def.capability_id or "")
+        if source is not None and source.kind == "mcp" and source.allowed_repos:
+            named = named_repo(args)
+            if named is not None and named.lower() not in source.allowed_repos:
+                raise SkipToolExecution(REPO_OUTSIDE.format(
+                    allowed=", ".join(source.allowed_repos), named=named))
         needs_person = self._level(tool_def) == "ask" or not self._is_loaded(tool_def)
         if not self._interactive and needs_person:
             raise SkipToolExecution(REFUSED_UNATTENDED.format(tool=call.tool_name))

@@ -37,6 +37,12 @@ def make_mcp_server() -> MCPServer:
         return f"created: {title}"
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    def make_payload(title: str) -> dict:
+        """Answer a search-args object — the console nesting test's inner
+        tool (its dict result becomes the outer call's args)."""
+        return {"query": f"made:{title}"}
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def env_probe() -> str:
         """Answer the FAKE_SECRET env var — the stdio tests' proof that
         secrets arrive as child env."""

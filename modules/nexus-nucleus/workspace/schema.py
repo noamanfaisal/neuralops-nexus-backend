@@ -54,6 +54,8 @@ class ProjectOut(Schema):
     # the DETAIL route (one aggregate query) and is ESTIMATED by design.
     spend_limit_monthly: Optional[str] = None
     spent_this_month: Optional[str] = None
+    # The project console switch (v1, docs/MISSING.md "project console").
+    console_enabled: bool = False
 
 
 class ProjectUpdateRequest(Schema):
@@ -66,6 +68,8 @@ class ProjectUpdateRequest(Schema):
     # The monthly spend cap: a number sets it, the flag clears it.
     spend_limit_monthly: Optional[float] = None
     clear_spend_limit: bool = False
+    # The project console switch (v1): None = not sent, keeps what is there.
+    console_enabled: Optional[bool] = None
 
 
 class ChannelCreateRequest(Schema):

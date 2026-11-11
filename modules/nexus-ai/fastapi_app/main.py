@@ -11,6 +11,7 @@ import os
 
 from fastapi import FastAPI
 
+from fastapi_app.routers.console import router as console_router
 from fastapi_app.routers.embed import router as embed_router
 from fastapi_app.routers.mcp_tools import router as mcp_tools_router
 from fastapi_app.routers.models import router as models_router
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(embed_router)   # items 24/44 + recall + reindex (Layer 3)
     app.include_router(search_router)      # Step 6: chat search + the gateway's search_memory
     app.include_router(mcp_tools_router)   # Step 6 / change 6: stored tool lists
+    app.include_router(console_router)     # project console v1: the data bus
 
     @app.get("/healthz")
     async def healthz() -> dict:

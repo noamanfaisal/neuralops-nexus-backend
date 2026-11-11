@@ -186,6 +186,32 @@ class NexusAIClient:
             raise RuntimeError(f"nexus-ai /models/transform/ returned {resp.status_code}: {resp.text[:300]}")
         return resp.json()
 
+    def console_run(self, payload: dict) -> tuple[int, dict | str]:
+        """POST /console/run (project console v1) — ONE typed line executed
+        against one of the project's MCP servers; no model, no tokens. The
+        payload carries the line, the server rows WITH decrypted secrets
+        (same trust boundary as the trigger job), the project folder and the
+        CLI's last-result buffer. Answers (status, body): 200 with the
+        engine's ConsoleRunResponse dict (ok=false rides inside it — a REPL
+        result, not a fault), 4xx with the engine's worded detail (a bad
+        line, an unknown server, an escaping path), or 502 with why the
+        engine could not be reached. Generous timeout: a stdio line may
+        spawn npx/uvx, which downloads the package on first use."""
+        if not self.configured:
+            return 502, "NEXUS_AI_URL not configured"
+        try:
+            resp = httpx.post(f"{self.base_url}/api/v1/console/run", json=payload,
+                              headers=self._headers, timeout=180)
+            if resp.status_code == 200:
+                return 200, resp.json()
+            try:
+                detail = resp.json().get("detail", f"status {resp.status_code}")
+            except Exception:  # noqa: BLE001 — a non-JSON error page
+                detail = f"status {resp.status_code}: {resp.text[:300]}"
+            return resp.status_code, detail
+        except Exception as exc:  # noqa: BLE001 — worded, never raised
+            return 502, f"{type(exc).__name__}: {exc}"
+
     def list_mcp_tools(self, url: str | None, bearer_token: str | None = None, *,
                        command: str | None = None, env: dict | None = None,
                        server_id: str | None = None) -> tuple[bool, list | str]:

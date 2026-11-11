@@ -321,3 +321,7 @@ modules/nexus-ai/tests/REPORT-live.md
 .ai-log-check.md
 # A local trial install of the release image (its own secrets and data).
 .trial/
+# csv-mcp is ITS OWN repo (nested working copy staged here because the
+# tooling writes inside this tree) — published separately, never part of
+# this repository.
+/csv-mcp/

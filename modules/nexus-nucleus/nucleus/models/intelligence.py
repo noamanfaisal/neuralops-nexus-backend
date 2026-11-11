@@ -909,6 +909,19 @@ class MCPServer(TenantBaseModel):
         help_text="Stored tool list [{name, description, read_only}] — see the Refresh tools button.",
     )
 
+    # 9b part 2 (owner, 2026-11-03): "Repositories this server may use" —
+    # lowercase owner/repo strings; empty = every repo the token reaches
+    # (today's behaviour). ENFORCED BY THE ENGINE's ApprovalGate on every
+    # tool call that names an owner/repo — reads included — which is what
+    # gives GitHub2 → repo-a, GitHub3 → repo-b on the same account while
+    # the vendor app is still an OAuth App. Normalised in
+    # intelligence/services.normalize_allowed_repos().
+    allowed_repos = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="owner/repo entries this server may act on; empty = all the token can reach.",
+    )
+
     # REMOVED:
     #   projects (M2M)  -> replaced by the `project` FK above
     #   secret_ref      -> never read by any code path
@@ -1016,6 +1029,37 @@ class Routine(ProjectBaseModel):
 
     def __str__(self) -> str:
         return f"/{self.name}"
+
+
+class ConsoleLog(ProjectBaseModel):
+    """
+    One project-console line (v1, docs/MISSING.md "project console") — the
+    audit the feature was designed with: no model is involved and no approval
+    card fires (the human IS the caller), so the record of WHO ran WHAT
+    against WHICH server is this row. Written by intelligence/console.py on
+    every run, success or not; the line is stored truncated, results are NOT
+    stored (they can be customer data — saved_to says where one was piped).
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="console_lines",
+    )
+    line = models.CharField(max_length=2000)       # as typed, truncated
+    server = models.CharField(max_length=255, blank=True, default="")
+    tool = models.CharField(max_length=255, blank=True, default="")
+    ok = models.BooleanField(default=False)
+    error = models.TextField(blank=True, default="")
+    saved_to = models.CharField(max_length=512, blank=True, default="")
+    duration_ms = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "intelligence_console_log"
+        indexes = [
+            models.Index(fields=["project", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"[{'ok' if self.ok else 'err'}] {self.server}.{self.tool}"
 
 
 # REMOVED (owner's ruling 2026-10-22, "remove recallentry completely"):

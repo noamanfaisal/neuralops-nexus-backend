@@ -92,6 +92,10 @@ class MCPServerInternal(Schema):
     # — the engine builds its catalog from it (one line per tool, reads known
     # before dialing) and tolerates drift against the live server.
     tools: list = Field(default_factory=list)
+    # 9b part 2: the row's repository allow-list (lowercase owner/repo;
+    # empty = no fence). The engine's ApprovalGate refuses any tool call —
+    # reads included — whose args name a repo outside it.
+    allowed_repos: list = Field(default_factory=list)
 
 
 class OtherServerInternal(Schema):
@@ -337,6 +341,7 @@ def _mcp_internal(server, needs_reauth: bool) -> MCPServerInternal:
         auth_type=server.auth_type,
         token_env_var=(server.oauth_config or {}).get("token_env_var", "OAUTH_ACCESS_TOKEN"),
         tools=server.tools or [],
+        allowed_repos=server.allowed_repos or [],
     )
 
 

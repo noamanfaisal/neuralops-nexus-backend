@@ -77,6 +77,7 @@ def _project_out(project, with_brief: bool = False) -> dict:
         # spend costs one aggregate query, so it rides the DETAIL route only.
         "spend_limit_monthly": str(project.spend_limit_monthly) if project.spend_limit_monthly is not None else None,
         "spent_this_month": str(svc.spend_this_month(project)) if with_brief else None,
+        "console_enabled": project.console_enabled,
         "channels": [
             {"id": str(c.id), "name": c.name, "slug": c.slug, "description": c.description}
             for c in channels
@@ -133,6 +134,7 @@ def update_project(request, project_id: str, payload: ProjectUpdateRequest):
             clear_default_router=payload.clear_default_router,
             spend_limit_monthly=payload.spend_limit_monthly,
             clear_spend_limit=payload.clear_spend_limit,
+            console_enabled=payload.console_enabled,
         )
     except ValueError as exc:
         raise HttpError(400, str(exc))
@@ -399,6 +401,55 @@ def open_browser_session(request, project_id: str, payload: BrowserSessionIn):
         return svc.open_browser_session(project, user, width=payload.width, height=payload.height, url=payload.url)
     except svc.BrowserError as exc:
         raise HttpError(exc.status, str(exc))
+
+
+# ── Project console (v1, docs/MISSING.md "project console") ───────────────
+
+class ConsoleRunIn(Schema):
+    line: str
+    # The CLI's `_` buffer — the previous line's result, sent back verbatim.
+    last_result: Optional[dict] = None
+
+
+def _require_console(user, project):
+    """Both gates, every line: the project's own switch AND the caller's
+    right. The order is deliberate — a disabled console answers the same
+    whoever asks, so the switch leaks nothing about who holds what."""
+    if not project.console_enabled:
+        raise HttpError(403, "The project console is switched off for this project. "
+                             "A project admin can turn it on in project settings.")
+    if not PermissionChecker.can(user, "mcp.playground", obj=project):
+        raise HttpError(403, "You don't have permission to use the project console.")
+
+
+@router.get("/{project_id}/console/servers/", response=dict)
+def console_servers(request, project_id: str):
+    """What the CLI's `servers` command prints: each dialable MCP server's
+    console name and its STORED tool catalog — no dial, no secrets."""
+    company, user = _resolve(request)
+    project = svc.get_project_object(company, project_id)
+    if not project:
+        raise HttpError(404, "Project not found.")
+    _require_console(user, project)
+    from intelligence.console import list_servers
+    return {"servers": list_servers(project)}
+
+
+@router.post("/{project_id}/console/run/", response=dict)
+def console_run(request, project_id: str, payload: ConsoleRunIn):
+    """One typed console line, relayed to the engine (which dials the named
+    MCP server and pipes results through the project folder). No model, no
+    approval card — the human is the caller; every line lands in ConsoleLog."""
+    company, user = _resolve(request)
+    project = svc.get_project_object(company, project_id)
+    if not project:
+        raise HttpError(404, "Project not found.")
+    _require_console(user, project)
+    from intelligence.console import run_line
+    status, body = run_line(company, user, project, payload.line, payload.last_result)
+    if status != 200:
+        raise HttpError(status if status in (400, 403, 404, 422, 502) else 502, str(body))
+    return body
 
 
 def ws_visible_topic(user, project, topic_id) -> bool:

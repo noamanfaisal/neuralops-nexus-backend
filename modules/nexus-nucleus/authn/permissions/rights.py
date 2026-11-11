@@ -128,6 +128,16 @@ REGISTRY = [
     # from model_config.* below, which stays COMPANY-only. ───────────────────
     ("mcp_server.update", ObjectType.MCP_SERVER, ScopeType.PROJECT,
      "Edit an MCP server belonging to a project."),
+    # Project console (v1, docs/MISSING.md "project console"): the data-bus
+    # REPL. Admin-tier like project.terminal — the caller drives the
+    # project's MCP servers DIRECTLY, with their stored credentials and no
+    # approval cards (the human is the caller; every line is audited in
+    # ConsoleLog). The project's own console_enabled switch is the second
+    # gate — both must be open.
+    ("mcp.playground", ObjectType.MCP_SERVER, ScopeType.PROJECT,
+     "Use the project console: call the project's MCP tools directly from "
+     "the CLI and pipe results through the project folder. The project's "
+     "console switch must also be on."),
 
     # ── Chat Topic ──────────────────────────────────────────────────────────
     ("topic.create", ObjectType.TOPIC, ScopeType.PROJECT,
@@ -263,6 +273,7 @@ DEFAULT_ROLE_RIGHTS = {
         "persona.mention",
         "persona.list", "persona.create", "persona.update", "persona.delete",
         "mcp_server.list", "mcp_server.create", "mcp_server.update", "mcp_server.delete",
+        "mcp.playground",
         "model_config.list", "model_config.create", "model_config.update",
         "model_config.delete", "model_config.attach",
         "schedule.create", "schedule.manage",

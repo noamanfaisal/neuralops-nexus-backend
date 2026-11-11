@@ -219,8 +219,15 @@ browse/download/view endpoints are BUILT and tested, see §3):**
   reply unless it was; (2) a check — a reply that names a tool as run with no
   matching tool call in the run gets flagged (or the claim stripped). Ties to
   the memory-pass hardening family.
-- **BUG — approval pauses fail once a run has read large tool output
-  ("Nothing is waiting on this message").** Found live 2026-10-27 with the
+- ~~BUG — approval pauses fail once a run has read large tool output
+  ("Nothing is waiting on this message")~~ **DONE (verified 2026-11-10):
+  `core/settings.py` sets the global cap to 16 MB with the hook's 64 KB
+  moved into scheduling/hooks_api.py (Content-Length judged BEFORE the
+  body is read → 413); internal/tests.py InternalBodySizeTests pins the
+  big pause + big usage batch (2/2 green), scheduling HookFireTests pins
+  the oversize hook body (12/12 green), and the engine's worded
+  "Couldn't hold this step for approval" error on a failed pause-save
+  shipped earlier (test_approvals + chat/reasons.py). Original entry:** Found live 2026-10-27 with the
   Dashboard persona (aaf-analytics tools on Ask): the first pauses saved
   (201), then a pause after two or three query results was refused by
   nucleus — `RequestDataTooBig: Request body exceeded
@@ -248,12 +255,19 @@ browse/download/view endpoints are BUILT and tested, see §3):**
   read-only.
 - ~~The aaf-analytics `neuralops` token was shown in a chat on 2026-10-27 —
   rotate it~~ **DONE 2026-10-28 (owner terminated the old tokens).**
-- **CHECK — prompt caching on Claude models.** The Usage page (project mktv,
-  2026-10-27) showed claude-sonnet-5-5 with 660K input tokens and **0
-  cached** (DeepSeek: 48% cached), so every Claude call paid full price for
-  the whole history. Check whether the engine enables Anthropic prompt
-  caching (cache breakpoints on the system prompt + history); if not, turn
-  it on and confirm cached tokens appear on the Usage page.
+- ~~CHECK — prompt caching on Claude models~~ **DONE — VERIFIED LIVE
+  2026-11-10 on the MKTV 1.1.7 install.** The fix was fix-round item 10
+  (B8): `agent_builder.py` sets `anthropic_cache: True` on Anthropic
+  specs (merged with the fixround branch, in the 1.1.7 image).
+  usage_record there now shows claude-sonnet-4-5: 85 calls, 864K input
+  of which **504K cache reads + 360K cache writes** (~58% from cache),
+  priced at the catalog's cached rate (prices_used:
+  input 3.00 / cached 0.30 / output 15.00 per million — cache reads at
+  10% of input), est. cost $1.99 total. The Usage page's "From cache"
+  stat + Cached column (built 2026-10-20) draw from these same sums.
+  Original entry: the Usage page (project mktv, 2026-10-27) showed
+  claude-sonnet with 660K input and 0 cached — the engine never asked
+  Anthropic to cache.
 
 **FIX ROUND — CODED 2026-10-28 night, in the COPY `/data/code/neuralops-fixwork`
 (+ `-frontend`), NOT in this folder — demo freeze. Pending: commit on a
@@ -1964,9 +1978,24 @@ capabilities still show "Coming soon". The API already returns
   pins it), and chat/reasons.py maps that wording through to the bubble
   instead of the provider-error line (chat/tests_reasons.py).
 
-- **FEATURE (designed with the owner 2026-11-08, build on his word): the
-  project console — a save/load data bus over the project's MCPs, no model
-  involved.** Owner's problem: MCP servers cannot talk to each other (the
+- **FEATURE — BUILT (v1 landed 2026-11-10; designed with the owner
+  2026-11-08): the project console — a save/load data bus over the
+  project's MCPs, no model involved.** What shipped: nexus-ai
+  `fastapi_app/routers/console.py` (the grammar, the dial, `>`/`@`
+  path-sandboxed to the project folder, size caps — 7 tests in
+  tests/test_console.py against fake_mcp, stdio road included); nucleus
+  migration 0047 (`Project.console_enabled` + the `ConsoleLog` audit
+  table), the `mcp.playground` right (Owner/Admin bundles — rerun
+  seed_permissions on upgrade), `intelligence/console.py` + the two
+  routes `GET/POST /projects/{id}/console/servers|run/` (8 tests in
+  intelligence/tests_console.py); frontend ConsoleSection toggle in the
+  project overview pane; `clients/console/` — the `neuralops-console`
+  CLI 0.1.0 (stdlib + httpx). Verified live on node3 dev end-to-end over
+  HTTP (toggle → servers → draw.io tool call saved to
+  /console/shapes.json → `_` buffer → off → 403). STILL TO DO: publish
+  the CLI to PyPI; ship as server 1.1.8; v2 ideas parked below
+  (@persona chat over centrifugo, pipes, recipes).
+  Original design notes, kept: Owner's problem: MCP servers cannot talk to each other (the
   protocol is hub-and-spoke), so moving one server's output into another —
   "write all GitHub issues to a file", "feed a saved file into neo4j" —
   burns model tokens and context today. Decisions, settled in discussion:
@@ -2018,12 +2047,24 @@ capabilities still show "Coming soon". The API already returns
   - **local** — the user runs the same compose on their own machine and
     registers it over the LAN, or through the ssh/stdio road (1.1.7) when
     the engine must reach a box with no public address.
-  FIRST DEPLOYABLE: **csv-mcp, its own repo** — MinIO (file store) +
-  DuckDB (analytics engine) + the MCP server + a caddy that serves result
-  files for download. Grows out of the DATA POD work above (code built
-  2026-10-30, "one runpod with duckdb + minio to handle large csv") — that
-  pod becomes the new repo's first content, repackaged as a product any
-  NeuralOps user can deploy. Open design questions for the ruling when
+  FIRST DEPLOYABLE: **csv-mcp — REPO BUILT 2026-11-10** (staged at
+  `csv-mcp/` inside this working copy, its OWN git repo — gitignored here
+  — initial commit 07f6f88; awaiting the owner's GitHub org/name to push).
+  SeaweedFS (S3) + DuckDB + the MCP server + Caddy as the ONE public door:
+  /mcp → the server, every other path → the store, so presigned
+  upload/download links ride the same port (Caddy keeps the Host header,
+  which keeps s3v4 signatures valid); docker-compose.tls.yaml gives
+  automatic HTTPS when DOMAIN is set. `./install.sh` mints .env secrets
+  (never printed). Canonical env is CSV_MCP_TOKEN (DATAPOD_TOKEN read as
+  fallback). Smoke-tested end to end on node3 (401 wall → tools →
+  presigned PUT through Caddy → GROUP BY → export + download link, all
+  green); the smoke .env was then burned (its throwaway S3_SECRET showed
+  in a transcript) and the stack torn down. License shipped as Apache-2.0
+  — the owner may swap in the Source Available license before publishing.
+  Grown out of the DATA POD (code built 2026-10-30, "one runpod with
+  duckdb + minio to handle large csv") — that pod, repackaged as a
+  product any NeuralOps user can deploy; data-pod/ stays as the
+  same-box-as-NeuralOps variant for now. Open design questions for the ruling when
   this starts: how the catalog tile carries the deploy story (README link
   vs an in-app "deploy it" sheet with the one command); whether deployable
   tiles are marked distinctly from hosted ones; and the token hand-off

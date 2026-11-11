@@ -376,6 +376,38 @@ def _apply_internal_normalisation(server) -> None:
         _blank_out(server, _CAPABILITY_FIELDS)  # external rows keep the protocol fields
 
 
+# 9b part 2: "owner/repo" entries only — a GitHub name is letters, digits,
+# dots, underscores and hyphens; names are case-insensitive, so the stored
+# form is lowercase (the engine's fence compares lowercased).
+_REPO_ENTRY = re.compile(r"^[a-z0-9][a-z0-9._-]*/[a-z0-9._-]+$")
+ALLOWED_REPOS_MAX = 200
+
+
+def normalize_allowed_repos(value) -> list[str]:
+    """The stored shape of a repository allow-list: lowercased, trimmed,
+    deduped (first spelling wins), order kept. A malformed entry is refused
+    with its own wording — a typo silently dropped would fence the wrong
+    repo. None/empty → [] (no fence)."""
+    if not value:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("allowed_repos must be a list of 'owner/repo' entries.")
+    out: list[str] = []
+    for raw in value:
+        entry = str(raw).strip().lower().removeprefix("https://github.com/").strip("/")
+        if not entry:
+            continue
+        if not _REPO_ENTRY.match(entry):
+            raise ValueError(
+                "Repository entries are 'owner/repo' (e.g. mapax-io/csv-mcp) — "
+                f"{str(raw)[:80]!r} is not.")
+        if entry not in out:
+            out.append(entry)
+    if len(out) > ALLOWED_REPOS_MAX:
+        raise ValueError(f"At most {ALLOWED_REPOS_MAX} repositories per server.")
+    return out
+
+
 def create_mcp_server_standalone(company, data: dict):
     """
     MCP servers are project-owned via a real FK now, so the per-project name
@@ -403,6 +435,9 @@ def create_mcp_server_standalone(company, data: dict):
         raise ValueError("A command-line tool server needs its command — e.g. "
                          "'uvx mcp-server-git', or an ssh line for a server "
                          "on another machine.")
+
+    if "allowed_repos" in data:
+        data["allowed_repos"] = normalize_allowed_repos(data.get("allowed_repos"))
 
     # Built then saved rather than .create()d, so normalisation lands before
     # the row hits the database and the constraint stays a backstop.
@@ -484,6 +519,11 @@ def update_mcp_server_standalone(company, server_id: str, data: dict):
     extra_secrets = data.pop("secrets", None)
     data.pop("project_id", None)      # ownership is fixed at creation
     data.pop("project", None)
+
+    # PATCH semantics: None = not sent (the setattr loop skips it); [] is a
+    # deliberate "clear the fence" and lands like any other value.
+    if data.get("allowed_repos") is not None:
+        data["allowed_repos"] = normalize_allowed_repos(data["allowed_repos"])
 
     for field, value in data.items():
         if value is not None:

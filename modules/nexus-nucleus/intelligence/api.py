@@ -122,13 +122,10 @@ def _model_config_ref(config) -> ModelConfigRef:
 
 # ── Stored tool lists (Step 6, handoff change 6) ───────────────────────
 
-def _bearer_for_dial(server) -> str | None:
-    """The same rule the engine applies at trigger time (toolset_builder):
-    oauth2 servers send the user access token, static ones client_secret."""
-    secrets = server.get_secrets()
-    if server.auth_type == "oauth2":
-        return secrets.get((server.oauth_config or {}).get("token_env_var", "OAUTH_ACCESS_TOKEN"))
-    return secrets.get("client_secret")
+# The same rule the engine applies at trigger time (toolset_builder):
+# oauth2 servers send the user access token, static ones client_secret.
+# One source now — the project console dials with it too.
+from .console import _bearer_for_dial  # noqa: E402
 
 
 def _refresh_server_tools(server) -> tuple[bool, str]:
@@ -193,6 +190,7 @@ def _mcp_out(server) -> MCPServerOut:
         oauth_connected=_oauth_connected(server),
         oauth_config=server.oauth_config,
         tools=server.tools or [],
+        allowed_repos=server.allowed_repos or [],
     )
 
 
