@@ -9,6 +9,7 @@ byte for byte (legacy prompt_builder.compose_system_prompt).
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Sequence
 
 from ai_engine.core.specs import (
@@ -89,4 +90,20 @@ class PromptLayout:
                        "When one would clearly help with what was asked, say so and name it — "
                        "someone with persona-edit rights can attach it to you under Intelligence.",
             ))
+        # Today's date rides as the one VOLATILE section: stable=False puts
+        # it LAST in the joined instructions (MessageConverter.instructions),
+        # so the stable cache prefix is byte-identical across turns, and the
+        # date-only text busts the cache at most once a day. Live finding
+        # 2026-11-12 (Contabo, job 4a563c44): a persona that did not know the
+        # date fetched timeanddate.com to learn it — and that site's 403
+        # killed the whole reply (the other half of that fix lives in
+        # toolset_builder._forgiving_web_fetch).
+        today = datetime.now(timezone.utc)
+        sections.append(PromptSection(
+            kind="current_date", priority=10, stable=False,
+            text=(f"Today's date is {today:%A, %Y-%m-%d} (UTC). "
+                  "Never fetch clock or calendar websites to learn the date "
+                  "or time; when the exact current time matters and no tool "
+                  "provides it, say it is not known."),
+        ))
         return PromptPlan(instructions=tuple(sections), history=bundle.history, message=message)

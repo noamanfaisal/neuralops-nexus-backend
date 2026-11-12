@@ -123,6 +123,12 @@ class ToolsetBuilder:
                 continue
             kwargs = _accepted_kwargs(builder, config)
             kwargs["id"] = key  # canonical id → tool defs carry it (gate mapping)
+            if key == "web_fetch" and kwargs.get("local") is True:
+                # The default local tool raises ModelRetry on any fetch
+                # failure, and the SECOND stubborn site crosses max_retries
+                # and kills the WHOLE reply — swap in the forgiving wrapper.
+                kwargs["local"] = _forgiving_web_fetch(
+                    kwargs.get("allowed_domains"), kwargs.get("blocked_domains"))
             capabilities.append(builder(**kwargs))
             sources[key] = ToolSource(kind="native", cap_key=key, source_id=key)
             if key in _NEEDS_WORKSPACE and workspace_root is None:
@@ -230,6 +236,44 @@ def _native_configs(persona: PersonaSpec) -> dict[str, dict]:
         for raw_key, config in (row.get("capability_config") or {}).items():
             configs[normalize_key(raw_key)] = dict(config or {})
     return configs
+
+
+def _forgiving_web_fetch(allowed_domains=None, blocked_domains=None):
+    """web_fetch's local road with failures WORDED instead of raised.
+
+    Live finding 2026-11-12 (Contabo, job 4a563c44): timeanddate.com answered
+    403 Forbidden, the library tool raised ModelRetry, the retry hit the same
+    403, and crossing the tool's max_retries raised UnexpectedModelBehavior —
+    which ended the WHOLE reply ("A tool the persona uses failed") over one
+    stubborn website. A page that refuses is an ordinary outcome, not a
+    malfunction, so this wrapper returns every failure as the tool RESULT:
+    the model reads the reason and routes around it, and nothing a website
+    does can kill a reply. ModelRetry stays for what it is meant for
+    (malformed arguments) — the only argument here is the url string itself.
+    """
+    from pydantic_ai.common_tools.web_fetch import WebFetchLocalTool  # noqa: PLC0415 — optional group, imported only when the capability is built
+
+    inner = WebFetchLocalTool(
+        max_content_length=50_000, allow_local_urls=False, timeout=30,
+        allowed_domains=list(allowed_domains) if allowed_domains else None,
+        blocked_domains=list(blocked_domains) if blocked_domains else None,
+    )
+
+    async def web_fetch(url: str):
+        """Fetches the content of a web page at the given URL and returns it as markdown."""
+        try:
+            return await inner(url)
+        except Exception as exc:  # noqa: BLE001 — every failure becomes a worded result
+            return {
+                "url": url,
+                "fetch_failed": True,
+                "reason": str(exc) or type(exc).__name__,
+                "guidance": ("This URL did not answer usefully. Do not fetch "
+                             "it again in this reply; use a different source "
+                             "or answer without it."),
+            }
+
+    return web_fetch
 
 
 def _accepted_kwargs(builder, config: dict) -> dict:
