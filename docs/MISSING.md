@@ -2093,3 +2093,50 @@ capabilities still show "Coming soon". The API already returns
   vs an in-app "deploy it" sheet with the one command); whether deployable
   tiles are marked distinctly from hosted ones; and the token hand-off
   (the install prints it once vs the tile's Secrets box flow).
+
+## 11. Idea shelf (owner, 2026-11-11/12) — NOT RULED, queued behind the launch wave
+
+Three frontend/client ideas from the Nov 11–12 evening sessions, parked
+deliberately: the 10k-traction launch wave outranks all of them. Order
+below is the owner's lean so far, not a ruling.
+
+### 11a. Slate input — "use your phone as a slate" (write anything, any language, get the answer)
+A full-screen drawing canvas as an INPUT MODE in a channel, mobile web
+first (no app store): strokes → PNG on send → posted into the chat as an
+ordinary image attachment → the persona's vision-capable model reads it
+and answers — handwritten math, Urdu, French, a sketched diagram, all
+free because recognition IS the model; we build only the surface.
+- Scope guardrails (agreed at ideation): snapshot-on-send only, NO live
+  stroke-by-stroke recognition; rides the existing chat/attachment
+  plumbing, no new backend service. ~90% a frontend feature.
+- VERIFY AT BUILD: that image attachments flow end to end through chat →
+  nucleus → engine → model for MOBILE WEB uploads/canvas blobs (the one
+  dependency this rests on).
+- Why it's queued high: it is the most demo-able "ship visibly" release
+  on the shelf — a 20-second clip of a hand writing a question on a phone
+  and the persona answering in the writer's language. Widens the story
+  from dev tool to "your family's private AI" (the kids-math use case is
+  a CONFIGURATION — a tutor persona — not a product; a standalone kids
+  app was considered and rejected: COPPA, app stores, B2C motion).
+
+### 11b. Client-side chat cache (last ~100 messages per channel)
+IndexedDB per channel; opening a channel paints instantly from cache,
+then reconciles — and with Centrifugo already streaming deltas, a
+last-seen cursor means fetching only the gap. Rules: server stays the
+source of truth; logout wipes the store. (Server-side Redis capped-list
+variant noted but deferred — Postgres with the (chat_id, created_at
+DESC) index is already fast; add only if channel-opens show in slow
+logs.) A Rust/WASM frontend rewrite was considered and REJECTED (chat is
+network/DOM-bound; WASM is a scalpel for compute hotspots only).
+
+### 11c. neuralops-tui — the Borland-blue terminal client
+A retro Turbo-C-style TUI client, ONE PROJECT PER LAUNCH (a workspace,
+not an IDE): channel list + chat + input + approval popup, four screens.
+v1 in PYTHON/TEXTUAL shipped as `uvx neuralops-tui <url>` (same lane as
+clients/console; days not weeks; textual-web as a free browser demo);
+the Rust/ratatui single-binary port only if v1 proves people love it.
+v2 shelf: diff pane (personas commit on branches → review in the TUI →
+approve the push), select-code-→-ask-the-model, and editor HANDOFF
+($EDITOR suspend/resume like git; never embed a terminal-in-terminal).
+Pure API consumer — auth token + REST + Centrifugo websocket; also the
+screenshot most likely to travel on X.
